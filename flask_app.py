@@ -1,0 +1,3031 @@
+from flask import Flask, render_template_string, request, redirect, url_for, flash, session, jsonify
+from datetime import datetime, timedelta
+import random
+import string
+import os
+import json
+import uuid
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+
+app = Flask(__name__)
+app.secret_key = 'your-super-secret-key-change-this-12345'
+
+# ==================== DATABASE CONFIGURATION ====================
+app.instance_path = os.path.join(os.getcwd(), 'instance')
+if not os.path.exists(app.instance_path):
+    os.makedirs(app.instance_path)
+
+db_path = os.path.join(app.instance_path, 'earnnpay.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'connect_args': {'check_same_thread': False}
+}
+
+db = SQLAlchemy(app)
+
+# ==================== DATABASE MODELS ====================
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+    referral_code = db.Column(db.String(10), unique=True)
+    referred_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    
+    full_name = db.Column(db.String(100), nullable=True)
+    phone = db.Column(db.String(20), nullable=True)
+    address = db.Column(db.String(200), nullable=True)
+    date_of_birth = db.Column(db.Date, nullable=True)
+    gender = db.Column(db.String(20), nullable=True)
+    occupation = db.Column(db.String(100), nullable=True)
+    
+    balance = db.Column(db.Float, default=0)
+    commission_balance = db.Column(db.Float, default=0)
+    trust_score = db.Column(db.Integer, default=0)
+    tier = db.Column(db.String(20), default='FREE')
+    daily_limit = db.Column(db.Integer, default=2)
+    daily_tasks_completed = db.Column(db.Integer, default=0)
+    streak_days = db.Column(db.Integer, default=0)
+    last_checkin = db.Column(db.DateTime, nullable=True)
+    last_task_reset = db.Column(db.DateTime, nullable=True)
+    
+    bank_name = db.Column(db.String(50), nullable=True)
+    bank_account = db.Column(db.String(20), nullable=True)
+    account_name = db.Column(db.String(100), nullable=True)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    referral_bonus_earned = db.Column(db.Float, default=0)
+    total_referrals = db.Column(db.Integer, default=0)
+    theme = db.Column(db.String(10), default='light')
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+    
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+    
+    def generate_referral_code(self):
+        return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    
+    def get_next_tier(self):
+        tiers = ['FREE', 'BEGINNER', 'EXPERT', 'LEGEND']
+        current = self.tier
+        if current in tiers:
+            idx = tiers.index(current)
+            if idx < len(tiers) - 1:
+                return tiers[idx + 1]
+        return None
+    
+    def get_profile_completion(self):
+        fields = ['full_name', 'phone', 'address', 'bank_name', 'bank_account', 'account_name']
+        completed = sum(1 for field in fields if getattr(self, field))
+        return int((completed / len(fields)) * 100)
+    
+    def __repr__(self):
+        return f'<User {self.username}>'
+
+class Referral(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    referrer_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    referred_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    bonus_paid = db.Column(db.Boolean, default=False)
+    bonus_amount = db.Column(db.Float, default=500)
+    verified = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Task(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    task_type = db.Column(db.String(50))
+    reward = db.Column(db.Float, nullable=False)
+    tier_required = db.Column(db.String(20), default='FREE')
+    external_link = db.Column(db.String(200), nullable=True)
+    daily_limit = db.Column(db.Integer, default=2)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class TaskCompletion(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    task_id = db.Column(db.Integer, db.ForeignKey('task.id'), nullable=False)
+    proof_text = db.Column(db.Text, nullable=True)
+    is_verified = db.Column(db.Boolean, default=False)
+    is_paid = db.Column(db.Boolean, default=False)
+    completed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Transaction(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    tier = db.Column(db.String(20), nullable=True)
+    transaction_id = db.Column(db.String(50), unique=True)
+    sender_name = db.Column(db.String(100))
+    payment_date = db.Column(db.DateTime)
+    notes = db.Column(db.Text)
+    status = db.Column(db.String(20), default='PENDING')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'amount': self.amount,
+            'tier': self.tier,
+            'transaction_id': self.transaction_id,
+            'sender_name': self.sender_name,
+            'status': self.status,
+            'date': self.created_at.strftime('%b %d, %Y %H:%M')
+        }
+
+class Withdrawal(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    bank_name = db.Column(db.String(50))
+    account_number = db.Column(db.String(20))
+    account_name = db.Column(db.String(100))
+    status = db.Column(db.String(20), default='PENDING')
+    reference = db.Column(db.String(50), unique=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    processed_at = db.Column(db.DateTime, nullable=True)
+
+class SupportTicket(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subject = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), default='OPEN')
+    priority = db.Column(db.String(20), default='MEDIUM')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'username': User.query.get(self.user_id).username if User.query.get(self.user_id) else 'Unknown',
+            'subject': self.subject,
+            'message': self.message[:100] + '...' if len(self.message) > 100 else self.message,
+            'status': self.status,
+            'priority': self.priority,
+            'date': self.created_at.strftime('%b %d, %Y %H:%M')
+        }
+
+class PaymentSettings(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    bank_name = db.Column(db.String(100), default='GTBank')
+    account_name = db.Column(db.String(100), default='Earn Pay Labs Ltd')
+    account_number = db.Column(db.String(20), default='0123456789')
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+# ==================== CREATE TABLES ====================
+with app.app_context():
+    db.drop_all()
+    db.create_all()
+    
+    if PaymentSettings.query.count() == 0:
+        default_settings = PaymentSettings(
+            bank_name='GTBank',
+            account_name='Earn Pay Labs Ltd',
+            account_number='0123456789'
+        )
+        db.session.add(default_settings)
+        db.session.commit()
+    
+    if Task.query.count() == 0:
+        default_tasks = [
+            Task(title='Google Review', description='Leave a genuine 5-star review on Google', 
+                 task_type='REVIEW', reward=50, tier_required='FREE'),
+            Task(title='Ad Click', description='Visit a site and earn N40 instantly', 
+                 task_type='ADS', reward=40, tier_required='FREE'),
+            Task(title='Google Review', description='Leave a genuine 5-star review on Google', 
+                 task_type='REVIEW', reward=150, tier_required='BEGINNER'),
+            Task(title='Ad Click', description='Visit a site and earn N40 instantly', 
+                 task_type='ADS', reward=120, tier_required='BEGINNER'),
+            Task(title='Premium Review', description='Write detailed review for higher pay', 
+                 task_type='REVIEW', reward=200, tier_required='BEGINNER'),
+            Task(title='Survey', description='Complete survey and earn big', 
+                 task_type='SURVEY', reward=180, tier_required='BEGINNER'),
+            Task(title='Google Review', description='Leave a genuine 5-star review on Google', 
+                 task_type='REVIEW', reward=450, tier_required='EXPERT'),
+            Task(title='Ad Click', description='Visit a site and earn N40 instantly', 
+                 task_type='ADS', reward=400, tier_required='EXPERT'),
+            Task(title='Premium Review', description='Write detailed review for higher pay', 
+                 task_type='REVIEW', reward=500, tier_required='EXPERT'),
+            Task(title='Survey', description='Complete survey and earn big', 
+                 task_type='SURVEY', reward=480, tier_required='EXPERT'),
+            Task(title='Video Task', description='Watch video and earn', 
+                 task_type='VIDEO', reward=350, tier_required='EXPERT'),
+            Task(title='Google Review', description='Leave a genuine 5-star review on Google', 
+                 task_type='REVIEW', reward=1000, tier_required='LEGEND'),
+            Task(title='Ad Click', description='Visit a site and earn N40 instantly', 
+                 task_type='ADS', reward=900, tier_required='LEGEND'),
+            Task(title='Premium Review', description='Write detailed review for higher pay', 
+                 task_type='REVIEW', reward=1100, tier_required='LEGEND'),
+            Task(title='Survey', description='Complete survey and earn big', 
+                 task_type='SURVEY', reward=1050, tier_required='LEGEND'),
+            Task(title='Video Task', description='Watch video and earn', 
+                 task_type='VIDEO', reward=950, tier_required='LEGEND'),
+            Task(title='Expert Task', description='Complete expert level task', 
+                 task_type='REVIEW', reward=1200, tier_required='LEGEND'),
+        ]
+        for task in default_tasks:
+            db.session.add(task)
+        db.session.commit()
+
+# ==================== CONFIGURATION ====================
+ADMIN_USERNAME = 'admin'
+ADMIN_PASSWORD = 'admin123'
+REFERRAL_BONUS = 500
+MINIMUM_WITHDRAWAL = 10000
+WITHDRAWAL_DAYS = [10, 30]
+
+# ==================== TIER CONFIGURATION ====================
+TIER_THRESHOLDS = {
+    'FREE': 0,
+    'BEGINNER': 100,
+    'EXPERT': 300,
+    'LEGEND': 700
+}
+
+TIER_TASKS = {
+    'FREE': 2,
+    'BEGINNER': 6,
+    'EXPERT': 10,
+    'LEGEND': 15
+}
+
+TIER_PRICES = {
+    'BEGINNER': 1000,
+    'EXPERT': 3500,
+    'LEGEND': 10000
+}
+
+# ==================== GOOGLE TRUSTED REVIEWS ====================
+GOOGLE_REVIEWS = [
+    {'name': 'Chidi O.', 'rating': 5, 'text': 'Absolutely love this platform! Earned N25,000 in my first month!', 'verified': True},
+    {'name': 'Ngozi E.', 'rating': 5, 'text': 'The referral system is amazing. I got N500 when my friend joined!', 'verified': True},
+    {'name': 'Emeka N.', 'rating': 4, 'text': 'Great platform for extra income. Tasks are simple and payments are fast.', 'verified': True},
+    {'name': 'Aisha B.', 'rating': 5, 'text': 'I recommend EarnPay to everyone. Legit and reliable!', 'verified': True},
+    {'name': 'Tunde A.', 'rating': 5, 'text': 'Upgraded to Expert tier and earning more now. Worth every naira!', 'verified': True},
+]
+
+FAKE_REVIEWS = [
+    {'name': 'Chioma O.', 'review': 'I earned N15,000 in just 2 weeks! This platform is amazing!', 'rating': 5, 'time': '2 hours ago'},
+    {'name': 'Emeka N.', 'review': 'The referral bonus is legit. I got N500 when my friend joined!', 'rating': 5, 'time': '5 hours ago'},
+    {'name': 'Aisha B.', 'review': 'Best earning platform in Nigeria. Tasks are simple and payments are fast!', 'rating': 5, 'time': '1 day ago'},
+    {'name': 'Tunde A.', 'review': 'Upgraded to Expert tier and earning N450 per review now. Worth it!', 'rating': 4, 'time': '2 days ago'},
+    {'name': 'Ngozi E.', 'review': 'I love how easy it is to withdraw my earnings. Received in 24 hours!', 'rating': 5, 'time': '3 days ago'},
+]
+
+# ==================== HELPER FUNCTIONS ====================
+def can_withdraw_today():
+    now = datetime.now()
+    day = now.day
+    return day in WITHDRAWAL_DAYS
+
+def get_next_withdrawal_date():
+    now = datetime.now()
+    current_day = now.day
+    current_month = now.month
+    current_year = now.year
+    
+    if current_day in WITHDRAWAL_DAYS:
+        return now.date()
+    
+    for day in sorted(WITHDRAWAL_DAYS):
+        if day > current_day:
+            try:
+                return datetime(current_year, current_month, day).date()
+            except ValueError:
+                continue
+    
+    next_month = current_month + 1
+    next_year = current_year
+    if next_month > 12:
+        next_month = 1
+        next_year += 1
+    
+    for day in sorted(WITHDRAWAL_DAYS):
+        try:
+            return datetime(next_year, next_month, day).date()
+        except ValueError:
+            continue
+    
+    return datetime(next_year, next_month, 10).date()
+
+def get_payment_settings():
+    settings = PaymentSettings.query.first()
+    if not settings:
+        settings = PaymentSettings(
+            bank_name='GTBank',
+            account_name='Earn Pay Labs Ltd',
+            account_number='0123456789'
+        )
+        db.session.add(settings)
+        db.session.commit()
+    return settings
+
+def get_tier_from_score(score):
+    if score >= TIER_THRESHOLDS['LEGEND']:
+        return 'LEGEND'
+    elif score >= TIER_THRESHOLDS['EXPERT']:
+        return 'EXPERT'
+    elif score >= TIER_THRESHOLDS['BEGINNER']:
+        return 'BEGINNER'
+    else:
+        return 'FREE'
+
+def get_next_tier_info(current_tier, current_score):
+    tiers = ['FREE', 'BEGINNER', 'EXPERT', 'LEGEND']
+    if current_tier in tiers:
+        idx = tiers.index(current_tier)
+        if idx < len(tiers) - 1:
+            next_tier = tiers[idx + 1]
+            needed = TIER_THRESHOLDS[next_tier] - current_score
+            return next_tier, max(0, needed)
+    return None, 0
+
+# ==================== STYLES ====================
+STYLES = """
+:root {
+    --primary: #6C3CE1;
+    --primary-dark: #5A2FC7;
+    --primary-light: #8B5CF6;
+    --secondary: #F59E0B;
+    --success: #10B981;
+    --danger: #EF4444;
+    --bg: #F0F2F5;
+    --card-bg: #FFFFFF;
+    --text: #1F2937;
+    --text-light: #6B7280;
+    --border: #E5E7EB;
+    --shadow: 0 4px 20px rgba(0,0,0,0.08);
+    --shadow-hover: 0 8px 35px rgba(108, 60, 225, 0.15);
+    --radius: 20px;
+    --radius-sm: 12px;
+    --transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    --nav-bg: rgba(255,255,255,0.95);
+    --hero-bg: linear-gradient(135deg, #6C3CE1, #8B5CF6);
+}
+
+[data-theme="dark"] {
+    --bg: #111827;
+    --card-bg: #1F2937;
+    --text: #F9FAFB;
+    --text-light: #9CA3AF;
+    --border: #374151;
+    --shadow: 0 4px 20px rgba(0,0,0,0.3);
+    --shadow-hover: 0 8px 35px rgba(108, 60, 225, 0.3);
+    --nav-bg: rgba(31, 41, 55, 0.95);
+    --hero-bg: linear-gradient(135deg, #4C1D95, #6C3CE1);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 16px;
+    padding-bottom: 90px;
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100vh;
+    overflow-x: hidden;
+    transition: var(--transition);
+}
+
+.logo-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+}
+.logo-icon {
+    width: 42px;
+    height: 42px;
+    background: linear-gradient(135deg, #6C3CE1, #8B5CF6);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 800;
+    color: white;
+    box-shadow: 0 4px 15px rgba(108, 60, 225, 0.3);
+    position: relative;
+    overflow: hidden;
+}
+.logo-icon::after {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -50%;
+    width: 100%;
+    height: 100%;
+    background: rgba(255,255,255,0.1);
+    border-radius: 50%;
+}
+.logo-icon span { position: relative; z-index: 1; }
+.logo-text { display: flex; flex-direction: column; line-height: 1.1; }
+.logo-text .main {
+    font-size: 18px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #6C3CE1, #8B5CF6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.5px;
+}
+.logo-text .sub {
+    font-size: 8px;
+    font-weight: 600;
+    color: var(--text-light);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+}
+.logo-text .sub span { color: #6C3CE1; }
+
+.google-trust {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--card-bg);
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    margin-bottom: 16px;
+}
+.google-trust .logo { font-size: 28px; font-weight: 700; color: #4285F4; }
+.google-trust .logo span { color: #EA4335; }
+.google-trust .stars { color: #F59E0B; font-size: 14px; }
+.google-trust .text { font-size: 12px; color: var(--text-light); }
+
+.google-review-card {
+    background: var(--card-bg);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+}
+.google-review-card .header { display: flex; justify-content: space-between; align-items: center; }
+.google-review-card .name { font-weight: 600; font-size: 14px; }
+.google-review-card .stars { color: #F59E0B; font-size: 13px; }
+.google-review-card .text { font-size: 13px; margin-top: 4px; color: var(--text); }
+.google-review-card .verified { font-size: 11px; color: var(--success); }
+
+.card {
+    background: var(--card-bg);
+    backdrop-filter: blur(20px);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
+    transition: var(--transition);
+    border: 1px solid rgba(255,255,255,0.1);
+    animation: slideUp 0.6s ease forwards;
+    opacity: 0;
+    transform: translateY(30px);
+}
+.card:hover { box-shadow: var(--shadow-hover); transform: translateY(-3px); }
+.card:active { transform: scale(0.99); }
+
+@keyframes slideUp {
+    to { opacity: 1; transform: translateY(0); }
+}
+.card:nth-child(1) { animation-delay: 0.05s; }
+.card:nth-child(2) { animation-delay: 0.1s; }
+.card:nth-child(3) { animation-delay: 0.15s; }
+.card:nth-child(4) { animation-delay: 0.2s; }
+.card:nth-child(5) { animation-delay: 0.25s; }
+
+.card h2 { font-size: 20px; font-weight: 700; margin-bottom: 12px; color: var(--text); }
+.card h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
+
+.btn {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 14px 24px;
+    border-radius: var(--radius-sm);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    text-decoration: none;
+    display: inline-block;
+    text-align: center;
+    transition: var(--transition);
+    position: relative;
+    overflow: hidden;
+}
+.btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.25);
+    transform: translate(-50%, -50%);
+    transition: width 0.6s, height 0.6s;
+}
+.btn:active::after { width: 400px; height: 400px; }
+.btn:active { transform: scale(0.97); }
+.btn-primary { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: white; box-shadow: 0 4px 15px rgba(108, 60, 225, 0.3); }
+.btn-secondary { background: var(--bg); color: var(--text); }
+.btn-success { background: linear-gradient(135deg, var(--success), #059669); color: white; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); }
+.btn-danger { background: linear-gradient(135deg, var(--danger), #DC2626); color: white; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3); }
+.btn-gold { background: linear-gradient(135deg, #F59E0B, #D97706); color: white; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3); }
+.btn-sm { padding: 8px 16px; font-size: 14px; width: auto; }
+.btn-logout { 
+    background: linear-gradient(135deg, #EF4444, #DC2626); 
+    color: white; 
+    padding: 10px 20px; 
+    font-size: 14px; 
+    font-weight: 700;
+    width: auto; 
+    border-radius: 50px;
+    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+    border: 2px solid rgba(255,255,255,0.2);
+}
+.btn-logout:hover { transform: scale(1.05); box-shadow: 0 6px 25px rgba(239, 68, 68, 0.5); }
+.btn-outline { background: transparent; color: var(--primary); border: 2px solid var(--primary); }
+.btn-outline:hover { background: var(--primary); color: white; }
+.btn-theme { 
+    background: var(--bg); 
+    color: var(--text); 
+    padding: 8px 12px; 
+    font-size: 18px; 
+    width: auto; 
+    border-radius: 50px; 
+    border: 1px solid var(--border);
+    transition: var(--transition);
+}
+.btn-theme:hover { border-color: var(--primary); }
+.btn-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.tier-badge {
+    padding: 4px 14px;
+    border-radius: 50px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: inline-block;
+    transition: var(--transition);
+}
+.tier-free { background: #F3F4F6; color: #6B7280; }
+.tier-beginner { background: linear-gradient(135deg, #DBEAFE, #93C5FD); color: #1E40AF; }
+.tier-expert { background: linear-gradient(135deg, #FEF3C7, #FCD34D); color: #92400E; }
+.tier-legend { background: linear-gradient(135deg, #FCE4EC, #F9A8D4); color: #9B1C1C; }
+
+.top-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 12px 16px;
+    background: var(--nav-bg);
+    backdrop-filter: blur(20px);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    animation: slideDown 0.5s ease;
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: var(--transition);
+}
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.top-header .user-actions { display: flex; align-items: center; gap: 8px; }
+.top-header .user-info { display: flex; align-items: center; gap: 8px; }
+
+.bottom-nav {
+    display: flex;
+    gap: 3px;
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--nav-bg);
+    backdrop-filter: blur(30px);
+    padding: 6px 8px;
+    border-radius: 60px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+    max-width: 460px;
+    width: calc(100% - 32px);
+    z-index: 1000;
+    border: 1px solid rgba(255,255,255,0.1);
+    animation: slideUp 0.6s ease;
+    transition: var(--transition);
+}
+.bottom-nav a {
+    flex: 1;
+    text-align: center;
+    padding: 6px 4px;
+    text-decoration: none;
+    color: var(--text-light);
+    font-size: 8px;
+    font-weight: 600;
+    border-radius: 50px;
+    transition: var(--transition);
+    position: relative;
+}
+.bottom-nav a .icon { font-size: 18px; display: block; margin-bottom: 1px; transition: var(--transition); }
+.bottom-nav a .label { font-size: 8px; display: block; transition: var(--transition); }
+.bottom-nav a:hover { color: var(--primary); transform: translateY(-2px); }
+.bottom-nav a.active {
+    color: white;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    box-shadow: 0 4px 20px rgba(108, 60, 225, 0.4);
+    padding: 6px 10px;
+    flex: 1.2;
+}
+.bottom-nav a.active .icon { font-size: 20px; }
+.bottom-nav a:active { transform: scale(0.9); }
+
+.hero-section {
+    background: var(--hero-bg);
+    border-radius: var(--radius);
+    padding: 30px 20px;
+    text-align: center;
+    color: white;
+    margin-bottom: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: var(--transition);
+}
+.hero-section::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -30%;
+    width: 200px;
+    height: 200px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 50%;
+}
+.hero-section::after {
+    content: '';
+    position: absolute;
+    bottom: -40%;
+    left: -20%;
+    width: 150px;
+    height: 150px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 50%;
+}
+.hero-section .hero-icon { font-size: 60px; margin-bottom: 12px; position: relative; z-index: 1; }
+.hero-section h1 { font-size: 28px; font-weight: 800; margin-bottom: 8px; position: relative; z-index: 1; }
+.hero-section p { opacity: 0.9; font-size: 16px; position: relative; z-index: 1; }
+
+.stats-counter {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 16px 0;
+}
+.stat-item {
+    background: rgba(255,255,255,0.15);
+    border-radius: var(--radius-sm);
+    padding: 12px 8px;
+    text-align: center;
+    backdrop-filter: blur(10px);
+}
+.stat-item .number { font-size: 22px; font-weight: 800; display: block; }
+.stat-item .label { font-size: 10px; opacity: 0.8; }
+
+.review-card {
+    background: var(--card-bg);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    border-left: 4px solid var(--primary);
+    transition: var(--transition);
+    animation: slideUp 0.6s ease forwards;
+    opacity: 0;
+    transform: translateY(20px);
+    box-shadow: var(--shadow);
+}
+.review-card:hover { transform: translateX(5px); box-shadow: var(--shadow-hover); }
+.review-card .review-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.review-card .review-name { font-weight: 700; font-size: 14px; }
+.review-card .review-time { font-size: 11px; color: var(--text-light); }
+.review-card .review-text { font-size: 14px; color: var(--text); }
+.review-card .review-stars { color: #F59E0B; font-size: 14px; }
+
+input, select, textarea {
+    width: 100%;
+    padding: 14px 16px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 16px;
+    margin: 6px 0;
+    transition: var(--transition);
+    background: var(--bg);
+    color: var(--text);
+}
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 4px rgba(108, 60, 225, 0.1);
+    background: var(--card-bg);
+}
+textarea { min-height: 80px; resize: vertical; }
+.form-group { margin-bottom: 16px; }
+.form-group label { font-weight: 600; font-size: 14px; color: var(--text); display: block; margin-bottom: 4px; }
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+.stat-box {
+    text-align: center;
+    padding: 16px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    transition: var(--transition);
+    border: 1px solid transparent;
+}
+.stat-box:hover { border-color: var(--primary); transform: translateY(-2px); }
+.stat-box:active { transform: scale(0.97); }
+.stat-box .value {
+    font-size: 26px;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--primary), var(--primary-light));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.stat-box .value.gold {
+    background: linear-gradient(135deg, #F59E0B, #D97706);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.stat-box .label { font-size: 12px; color: var(--text-light); margin-top: 4px; font-weight: 500; }
+
+.progress-bar {
+    background: var(--bg);
+    height: 10px;
+    border-radius: 50px;
+    overflow: hidden;
+    margin-top: 8px;
+}
+.progress-fill {
+    background: linear-gradient(90deg, var(--primary), var(--primary-light));
+    height: 100%;
+    border-radius: 50px;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.alert {
+    padding: 14px 18px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+    font-weight: 500;
+    border-left: 4px solid;
+    animation: slideDown 0.3s ease;
+}
+.alert-success { background: #ECFDF5; color: #065F46; border-color: var(--success); }
+.alert-error { background: #FEF2F2; color: #991B1B; border-color: var(--danger); }
+.alert-info { background: #EFF6FF; color: #1E40AF; border-color: var(--primary); }
+
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.flex-center { display: flex; justify-content: center; align-items: center; }
+.text-muted { color: var(--text-light); font-size: 14px; }
+.text-center { text-align: center; }
+.text-gold { color: var(--secondary); }
+.mt-2 { margin-top: 12px; }
+.mb-2 { margin-bottom: 12px; }
+.mt-3 { margin-top: 20px; }
+
+.gradient-text {
+    background: linear-gradient(135deg, var(--primary), var(--primary-light));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.tier-card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 2px solid var(--border);
+    transition: var(--transition);
+    cursor: pointer;
+    box-shadow: var(--shadow);
+}
+.tier-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-hover); }
+.tier-card:active { transform: scale(0.98); }
+.tier-card.popular {
+    border-color: var(--primary);
+    background: linear-gradient(135deg, rgba(108, 60, 225, 0.1), rgba(139, 92, 246, 0.05));
+}
+.tier-card .price { font-size: 28px; font-weight: 800; color: var(--primary); }
+.tier-card .price small { font-size: 14px; font-weight: 400; color: var(--text-light); }
+
+.badge-popular {
+    background: linear-gradient(135deg, #F59E0B, #D97706);
+    color: white;
+    padding: 2px 10px;
+    border-radius: 50px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    float: right;
+    animation: pulse 2s infinite;
+}
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.bank-details-box {
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    margin: 8px 0;
+    border: 2px dashed var(--primary);
+}
+.bank-details-box .label { font-size: 12px; color: var(--text-light); }
+.bank-details-box .value { font-size: 18px; font-weight: 700; color: var(--text); }
+
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 50px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.status-pending { background: #FEF3C7; color: #92400E; }
+.status-verified { background: #D1FAE5; color: #065F46; }
+.status-rejected { background: #FEE2E2; color: #991B1B; }
+.status-completed { background: #DBEAFE; color: #1E40AF; }
+
+.login-features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 12px;
+}
+.login-feature {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+}
+.login-feature .icon { font-size: 18px; }
+
+.bonus-badge {
+    background: linear-gradient(135deg, #F59E0B, #D97706);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 50px;
+    font-size: 11px;
+    font-weight: 700;
+    animation: pulse 2s infinite;
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: linear-gradient(135deg, var(--primary), var(--primary-light)); border-radius: 50px; }
+
+.gradient-border {
+    position: relative;
+    background: var(--card-bg);
+    border-radius: var(--radius);
+}
+.gradient-border::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    border-radius: var(--radius);
+    background: linear-gradient(45deg, var(--primary), var(--secondary), var(--success), var(--primary));
+    background-size: 400% 400%;
+    z-index: -1;
+    animation: gradientBorder 4s ease infinite;
+}
+@keyframes gradientBorder {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+.profile-completion {
+    margin-top: 8px;
+}
+.profile-completion .label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--text-light);
+}
+.profile-completion .bar {
+    height: 6px;
+    background: var(--bg);
+    border-radius: 50px;
+    overflow: hidden;
+    margin-top: 4px;
+}
+.profile-completion .fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--success), var(--primary));
+    border-radius: 50px;
+    transition: width 0.8s ease;
+}
+
+.withdrawal-info {
+    background: linear-gradient(135deg, #FEF3C7, #FCD34D);
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    border-left: 4px solid var(--secondary);
+}
+.withdrawal-info .highlight {
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.upgrade-info {
+    background: linear-gradient(135deg, #FEF3C7, #FCD34D);
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    border-left: 4px solid var(--secondary);
+    margin-bottom: 16px;
+}
+.upgrade-info .highlight {
+    font-weight: 700;
+    color: var(--primary);
+}
+"""
+
+# ==================== PAGE DEFINITIONS ====================
+
+# LANDING_PAGE
+LANDING_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body>
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Trusted Platform</span>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <a href="/login" class="btn btn-sm btn-outline" style="width:auto;padding:8px 16px;">Login</a>
+            </div>
+        </div>
+        <div class="hero-section">
+            <div class="hero-icon">🚀</div>
+            <h1>Earn Real Cash</h1>
+            <p>Complete tasks, get paid instantly, and upgrade your earning potential!</p>
+            <div style="margin-top:16px;">
+                <a href="/register" class="btn btn-gold" style="width:auto;padding:12px 32px;display:inline-block;font-size:18px;">
+                    🎯 Create Account & Start Earning
+                </a>
+            </div>
+            <div style="margin-top:12px;font-size:13px;opacity:0.8;">
+                ⚡ Free to join · No hidden fees · Instant payments
+            </div>
+        </div>
+        <div class="google-trust">
+            <div class="logo">G<span>o</span><span style="color:#FBBC05;">o</span><span style="color:#4285F4;">g</span><span style="color:#EA4335;">l</span><span style="color:#34A853;">e</span></div>
+            <div>
+                <div class="stars">⭐⭐⭐⭐⭐ 4.8</div>
+                <div class="text">Trusted by 10,000+ users</div>
+            </div>
+            <div style="margin-left:auto;font-size:12px;color:var(--text-light);">✅ Verified</div>
+        </div>
+        <div class="card">
+            <h3>⭐ Google Trusted Reviews</h3>
+            {% for review in google_reviews %}
+            <div class="google-review-card">
+                <div class="header">
+                    <span class="name">{{ review.name }}</span>
+                    <span class="stars">{% for i in range(review.rating) %}⭐{% endfor %}</span>
+                </div>
+                <div class="text">"{{ review.text }}"</div>
+                <div class="verified">✅ Verified Google Review</div>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="stats-counter">
+            <div class="stat-item"><span class="number">10K+</span><span class="label">Active Users</span></div>
+            <div class="stat-item"><span class="number">100K+</span><span class="label">Tasks Done</span></div>
+        </div>
+        <div class="card">
+            <h3>⚡ How It Works</h3>
+            <div style="margin-top:12px;">
+                <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">
+                    <span style="font-size:28px;">📝</span>
+                    <div><strong>Complete Tasks</strong><br><span class="text-muted">Write reviews, click ads, earn rewards</span></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">
+                    <span style="font-size:28px;">💵</span>
+                    <div><strong>Get Paid Instantly</strong><br><span class="text-muted">Money drops straight into your wallet</span></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;padding:12px 0;">
+                    <span style="font-size:28px;">👥</span>
+                    <div><strong>Refer & Earn</strong><br><span class="text-muted">Earn ₦500 for every friend who joins</span></div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>⭐ What People Are Saying</h3>
+            <div style="margin-top:8px;max-height:300px;overflow-y:auto;padding-right:4px;">
+                {% for review in reviews %}
+                <div class="review-card">
+                    <div class="review-header">
+                        <span class="review-name">{{ review.name }}</span>
+                        <span class="review-time">{{ review.time }}</span>
+                    </div>
+                    <div class="review-stars">{% for i in range(review.rating) %}⭐{% endfor %}</div>
+                    <div class="review-text">"{{ review.review }}"</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="card" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;text-align:center;border:none;">
+            <h2 style="color:white;">🎯 Ready to Start Earning?</h2>
+            <p style="opacity:0.9;">Join thousands of users already earning!</p>
+            <div style="margin-top:16px;display:flex;gap:8px;flex-direction:column;">
+                <a href="/register" class="btn btn-gold">Create Account Now</a>
+                <a href="/login" class="btn btn-outline" style="border-color:white;color:white;background:rgba(255,255,255,0.1);">Already have an account? Login</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# LOGIN_PAGE
+LOGIN_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body>
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Login</span>
+                </div>
+            </div>
+            <a href="/" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="card gradient-border">
+            <div style="text-align:center;margin-bottom:16px;">
+                <div style="font-size:48px;">🔐</div>
+                <h2>Welcome Back!</h2>
+                <p class="text-muted">Login to continue earning 💰</p>
+            </div>
+            <form method="POST">
+                <div class="form-group">
+                    <label>👤 Username</label>
+                    <input type="text" name="username" required placeholder="Enter your username">
+                </div>
+                <div class="form-group">
+                    <label>🔑 Password</label>
+                    <input type="password" name="password" required placeholder="Enter your password">
+                </div>
+                <button type="submit" class="btn btn-primary">🚀 Login</button>
+            </form>
+            <div class="login-features">
+                <div class="login-feature"><span class="icon">✅</span> Instant Earnings</div>
+                <div class="login-feature"><span class="icon">💰</span> Referral Bonuses</div>
+                <div class="login-feature"><span class="icon">⬆️</span> Upgrade Tiers</div>
+                <div class="login-feature"><span class="icon">🔒</span> Secure Platform</div>
+            </div>
+            <p class="text-center mt-2">Don't have an account? <a href="/register" style="color:var(--primary);font-weight:600;">Register Now →</a></p>
+        </div>
+        <div class="card" style="background:linear-gradient(135deg,#F3F4F6,white);text-align:center;">
+            <p class="text-muted" style="font-size:12px;">🔒 Your data is secure with us</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# REGISTER_PAGE
+REGISTER_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body>
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Register</span>
+                </div>
+            </div>
+            <a href="/" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="card gradient-border">
+            <div style="text-align:center;margin-bottom:16px;">
+                <div style="font-size:48px;">📝</div>
+                <h2>Create Account</h2>
+                <p class="text-muted">Join and start earning today! 🚀</p>
+            </div>
+            <form method="POST">
+                <div class="form-group">
+                    <label>👤 Username</label>
+                    <input type="text" name="username" required placeholder="Choose a unique username">
+                </div>
+                <div class="form-group">
+                    <label>📧 Email</label>
+                    <input type="email" name="email" required placeholder="Your email address">
+                </div>
+                <div class="form-group">
+                    <label>🔑 Password</label>
+                    <input type="password" name="password" required placeholder="Create a strong password">
+                </div>
+                <div class="form-group">
+                    <label>✅ Confirm Password</label>
+                    <input type="password" name="confirm_password" required placeholder="Confirm your password">
+                </div>
+                <button type="submit" class="btn btn-primary">🎯 Create Account</button>
+            </form>
+            <div style="margin-top:16px;background:linear-gradient(135deg,#FEF3C7,#FCD34D);padding:12px;border-radius:var(--radius-sm);text-align:center;">
+                <span style="font-weight:600;">🎉 Bonus:</span>
+                <span class="text-muted">Refer friends and earn <strong>₦500</strong> each!</span>
+            </div>
+            <p class="text-center mt-2">Already have an account? <a href="/login" style="color:var(--primary);font-weight:600;">Login →</a></p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# DASHBOARD_PAGE
+DASHBOARD_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Dashboard</span>
+                </div>
+            </div>
+            <div class="user-actions">
+                <div class="user-info">
+                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
+                </div>
+                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="card" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;position:relative;overflow:hidden;border:none;">
+            <div style="position:absolute;top:-50px;right:-50px;width:150px;height:150px;background:rgba(255,255,255,0.1);border-radius:50%;"></div>
+            <div style="position:absolute;bottom:-30px;left:-30px;width:100px;height:100px;background:rgba(255,255,255,0.08);border-radius:50%;"></div>
+            <div style="position:relative;z-index:1;">
+                <div style="font-size:14px;opacity:0.8;margin-bottom:4px;">💰 Available Balance</div>
+                <div style="font-size:40px;font-weight:800;">₦{{ "%.2f"|format(user.balance) }}</div>
+                <div style="display:flex;gap:12px;margin-top:16px;flex-wrap:wrap;">
+                    <span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:50px;font-size:12px;">⭐ Trust Score: {{ user.trust_score }}</span>
+                    <span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:50px;font-size:12px;">🔥 {{ user.streak_days }} day streak</span>
+                    <span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:50px;font-size:12px;">👥 {{ total_referrals }} referrals</span>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="flex-between">
+                <span style="font-weight:600;">
+                    {% if next_tier %}
+                        {{ needed_points }} more to <span class="gradient-text">{{ next_tier }}</span>
+                    {% else %}
+                        <span class="gradient-text">MAX LEVEL</span>
+                    {% endif %}
+                </span>
+                <span style="font-weight:600;color:var(--primary);">{{ "%.0f"|format(progress) }}%</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:{{ progress }}%;"></div></div>
+            <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap;">
+                <span class="tier-badge tier-free {% if user.tier == 'FREE' %}active{% endif %}">FREE</span>
+                <span class="tier-badge tier-beginner {% if user.tier == 'BEGINNER' %}active{% endif %}">BEGINNER</span>
+                <span class="tier-badge tier-expert {% if user.tier == 'EXPERT' %}active{% endif %}">EXPERT</span>
+                <span class="tier-badge tier-legend {% if user.tier == 'LEGEND' %}active{% endif %}">LEGEND</span>
+            </div>
+            <div class="trust-progress">
+                <div class="level">
+                    <span>0</span>
+                    <span class="{% if user.trust_score >= 100 %}completed{% endif %}">100</span>
+                    <span class="{% if user.trust_score >= 300 %}completed{% endif %}">300</span>
+                    <span class="{% if user.trust_score >= 700 %}completed{% endif %}">700</span>
+                </div>
+            </div>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-box"><div class="value">₦{{ "%.2f"|format(user.commission_balance) }}</div><div class="label">💸 Commission</div></div>
+            <div class="stat-box"><div class="value gold">{{ user.daily_limit }}</div><div class="label">📝 Daily Limit</div></div>
+            <div class="stat-box"><div class="value">{{ today_tasks }}</div><div class="label">✅ Tasks Done</div></div>
+            <div class="stat-box"><div class="value">{{ remaining_tasks }}</div><div class="label">⏳ Tasks Left</div></div>
+        </div>
+        <div class="card">
+            <div class="flex-between">
+                <h3>⚡ Quick Actions</h3>
+                <span style="font-size:11px;color:var(--text-light);">🔄 Resets in {{ reset_time }}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+                <a href="/earn" class="btn btn-primary" style="font-size:14px;padding:12px;">💰 Earn</a>
+                <a href="/upgrade" class="btn btn-gold" style="font-size:14px;padding:12px;">⬆️ Upgrade</a>
+                <a href="/referral" class="btn btn-secondary" style="font-size:14px;padding:12px;">👥 Refer</a>
+                <a href="/withdraw" class="btn btn-success" style="font-size:14px;padding:12px;">💸 Withdraw</a>
+            </div>
+        </div>
+        <nav class="bottom-nav">
+            <a href="/" class="active"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
+            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
+            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
+            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
+        </nav>
+    </div>
+</body>
+</html>
+"""
+
+# EARN_PAGE
+EARN_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Earn - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Earn</span>
+                </div>
+            </div>
+            <div class="user-actions">
+                <div class="user-info">
+                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
+                </div>
+                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="card" style="background:linear-gradient(135deg,#F59E0B,#D97706);color:white;border:none;">
+            <div style="font-size:14px;opacity:0.9;">📊 Today's Earning Potential</div>
+            <div style="font-size:32px;font-weight:800;">₦{{ remaining * 50 }}</div>
+            <div style="font-size:12px;opacity:0.8;">{{ remaining }} tasks available</div>
+        </div>
+        {% for task in tasks %}
+        <div class="card" style="border-left:4px solid var(--primary);">
+            <div class="flex-between">
+                <div>
+                    <h3>{{ task.title }}</h3>
+                    <p class="text-muted">{{ task.description }}</p>
+                    <div style="margin-top:6px;">
+                        <span class="tier-badge tier-{{ task.tier_required|lower }}">{{ task.tier_required }}</span>
+                        <span style="margin-left:8px;font-size:12px;color:var(--text-light);">💵 ₦{{ task.reward }}</span>
+                    </div>
+                </div>
+                <div>
+                    {% if task.id in completed_ids %}
+                        <span style="background:#10B981;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">✅ Done</span>
+                    {% elif remaining <= 0 %}
+                        <span style="background:#EF4444;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">⛔ Limit</span>
+                    {% else %}
+                        <form method="POST" action="/complete_task/{{ task.id }}">
+                            <button type="submit" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;border:none;padding:10px 20px;border-radius:50px;font-size:14px;font-weight:600;cursor:pointer;">🚀 Start</button>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="card">
+            <p class="text-center text-muted">🎯 No tasks available for your tier</p>
+            <a href="/upgrade" class="btn btn-gold mt-2">⬆️ Upgrade to unlock more</a>
+        </div>
+        {% endfor %}
+        <div class="card" style="text-align:center;background:linear-gradient(135deg,#F3F4F6,white);">
+            <p class="text-muted">💡 Complete tasks to earn rewards and increase your Trust Score</p>
+        </div>
+        <nav class="bottom-nav">
+            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/earn" class="active"><span class="icon">💰</span><span class="label">Earn</span></a>
+            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
+            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
+            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
+        </nav>
+    </div>
+</body>
+</html>
+"""
+
+# REFERRAL_PAGE
+REFERRAL_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Referrals - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Refer</span>
+                </div>
+            </div>
+            <div class="user-actions">
+                <div class="user-info">
+                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
+                </div>
+                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="card" style="background:linear-gradient(135deg,#10B981,#059669);color:white;text-align:center;border:none;">
+            <div style="font-size:48px;">👥</div>
+            <h2>Invite & Earn</h2>
+            <p style="opacity:0.9;">Earn <strong>₦500</strong> for every friend who joins!</p>
+            <div style="margin-top:8px;">
+                <span class="bonus-badge">🎯 Total Earned: ₦{{ "%.2f"|format(user.referral_bonus_earned) }}</span>
+            </div>
+        </div>
+        <div class="card">
+            <div class="form-group">
+                <label>📋 Your Referral Link</label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input type="text" value="{{ referral_link }}" readonly style="flex:1;" onclick="this.select();navigator.clipboard.writeText(this.value);">
+                    <button onclick="navigator.clipboard.writeText('{{ referral_link }}');alert('✅ Link copied!')" style="background:var(--primary);color:white;border:none;padding:12px 16px;border-radius:12px;cursor:pointer;font-size:20px;">📋</button>
+                </div>
+            </div>
+            <div style="background:linear-gradient(135deg,#FEF3C7,#FCD34D);padding:12px;border-radius:var(--radius-sm);text-align:center;">
+                <span style="font-weight:600;">💡 Share your link on social media or with friends!</span>
+            </div>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-box"><div class="value">{{ total_invites }}</div><div class="label">📊 Total Invites</div></div>
+            <div class="stat-box"><div class="value gold">{{ verified_users }}</div><div class="label">✅ Verified</div></div>
+        </div>
+        <div class="card">
+            <h3>📊 Downline by Tier</h3>
+            <div style="margin-top:12px;">
+                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);"><span class="tier-badge tier-free">FREE</span><span style="font-weight:600;">{{ downline.FREE }}</span></div>
+                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);"><span class="tier-badge tier-beginner">BEGINNER</span><span style="font-weight:600;">{{ downline.BEGINNER }}</span></div>
+                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);"><span class="tier-badge tier-expert">EXPERT</span><span style="font-weight:600;">{{ downline.EXPERT }}</span></div>
+                <div style="display:flex;justify-content:space-between;padding:8px 0;"><span class="tier-badge tier-legend">LEGEND</span><span style="font-weight:600;">{{ downline.LEGEND }}</span></div>
+            </div>
+        </div>
+        {% if referrals %}
+        <div class="card">
+            <h3>👥 Referred Users</h3>
+            {% for ref in referrals %}
+            <div style="padding:8px 0;border-bottom:1px solid var(--border);">
+                <div class="flex-between">
+                    <div><strong>{{ ref.username }}</strong><span class="tier-badge tier-{{ ref.tier|lower }}" style="font-size:10px;margin-left:8px;">{{ ref.tier }}</span></div>
+                    <div style="text-align:right;"><span style="font-size:12px;color:var(--text-light);">⭐ {{ ref.trust_score }} pts</span><div style="font-size:11px;color:#10B981;">+₦500 bonus</div></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        <nav class="bottom-nav">
+            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
+            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
+            <a href="/referral" class="active"><span class="icon">👥</span><span class="label">Refer</span></a>
+            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
+        </nav>
+    </div>
+</body>
+</html>
+"""
+
+# UPGRADE_PAGE
+UPGRADE_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upgrade - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Upgrade</span>
+                </div>
+            </div>
+            <div class="user-actions">
+                <div class="user-info">
+                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
+                </div>
+                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="upgrade-info">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:20px;">💡</span>
+                <div>
+                    <strong>Upgrade via Payment Only</strong>
+                    <div style="font-size:13px;color:var(--text-light);">
+                        Send payment to the bank details below and submit your proof for verification.
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card" style="text-align:center;">
+            <h2 style="font-size:24px;">🚀 Upgrade Your Tier</h2>
+            <p class="text-muted">Pay to unlock higher paying tasks!</p>
+        </div>
+        <div class="card" style="text-align:center;background:linear-gradient(135deg,#F3F4F6,white);">
+            <div style="font-size:14px;color:var(--text-light);">📌 Current Tier</div>
+            <div style="font-size:32px;font-weight:800;" class="gradient-text">{{ user.tier }}</div>
+            <div style="font-size:14px;color:var(--text-light);">📝 {{ user.daily_limit }} tasks/day</div>
+        </div>
+        
+        {% set payment_settings = get_payment_settings() %}
+        <div class="card" style="background:linear-gradient(135deg,#EDE9FE,white);border:2px solid var(--primary);">
+            <h3 style="color:var(--primary);">🏦 Send Payment To:</h3>
+            <div class="bank-details-box">
+                <div><span class="label">🏛️ Bank:</span> <span class="value">{{ payment_settings.bank_name }}</span></div>
+                <div><span class="label">👤 Account Name:</span> <span class="value">{{ payment_settings.account_name }}</span></div>
+                <div><span class="label">🔢 Account Number:</span> <span class="value" style="color:var(--primary);font-size:20px;">{{ payment_settings.account_number }}</span></div>
+            </div>
+            <p class="text-muted" style="font-size:12px;text-align:center;">⚠️ Send the exact amount for your chosen tier</p>
+        </div>
+        
+        {% for tier_key, tier in tiers.items() %}
+            {% if user.tier != tier_key %}
+            <div class="tier-card {% if tier_key == 'EXPERT' %}popular{% endif %}">
+                {% if tier_key == 'EXPERT' %}<span class="badge-popular">🔥 POPULAR</span>{% endif %}
+                <div class="flex-between">
+                    <div>
+                        <h3 style="font-size:20px;">{{ tier.name }}</h3>
+                        <p class="text-muted">{{ tier.description }}</p>
+                        <div style="margin-top:6px;"><span class="tier-badge tier-{{ tier_key|lower }}">{{ tier_key }}</span></div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div class="price">₦{{ "%.2f"|format(tier.cost) }}</div>
+                        <button onclick="showPaymentForm('{{ tier_key }}', {{ tier.cost }})" class="btn btn-primary btn-sm" style="margin-top:8px;width:auto;">💳 Pay & Upgrade</button>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        {% endfor %}
+        
+        <div id="paymentForm" style="display:none;">
+            <div class="card" style="border:2px solid var(--success);">
+                <h3>💳 Submit Payment Proof</h3>
+                <p class="text-muted">After sending money, fill this form to confirm your payment.</p>
+                <form method="POST" action="/submit_payment">
+                    <input type="hidden" name="tier" id="selectedTier">
+                    <input type="hidden" name="amount" id="selectedAmount">
+                    <div class="form-group"><label>👤 Full Name (as sender)</label><input type="text" name="sender_name" placeholder="Your full name" required></div>
+                    <div class="form-group"><label>🔢 Transaction Reference / ID</label><input type="text" name="transaction_id" placeholder="e.g., 1234567890" required></div>
+                    <div class="form-group"><label>💰 Amount Sent (₦)</label><input type="number" name="amount_sent" id="amountSent" required></div>
+                    <div class="form-group"><label>📅 Payment Date & Time</label><input type="datetime-local" name="payment_date" required></div>
+                    <div class="form-group"><label>📝 Additional Notes (optional)</label><textarea name="notes" placeholder="Any extra details..."></textarea></div>
+                    <button type="submit" class="btn btn-success">✅ Submit Payment Proof</button>
+                    <button type="button" onclick="hidePaymentForm()" class="btn btn-secondary mt-2">❌ Cancel</button>
+                </form>
+            </div>
+        </div>
+        
+        {% if transactions_list %}
+        <div class="card">
+            <h3>📜 Your Payment History</h3>
+            {% for tx in transactions_list %}
+            <div style="padding:8px 0;border-bottom:1px solid var(--border);">
+                <div class="flex-between">
+                    <div><strong>{{ tx.tier }}</strong><span style="font-size:12px;color:var(--text-light);">₦{{ "%.2f"|format(tx.amount) }}</span></div>
+                    <div><span class="status-badge status-{{ tx.status|lower }}">{{ tx.status }}</span></div>
+                </div>
+                <div class="text-muted" style="font-size:11px;">{{ tx.date }} · Ref: {{ tx.transaction_id }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        
+        <div class="card" style="background:linear-gradient(135deg,#F3F4F6,white);">
+            <h3>💡 How It Works</h3>
+            <ol style="margin-top:8px;padding-left:20px;">
+                <li style="padding:4px 0;">💰 Send payment to the bank details above</li>
+                <li style="padding:4px 0;">📸 Fill the payment form with proof</li>
+                <li style="padding:4px 0;">⏳ Wait for admin verification (24-48 hours)</li>
+                <li style="padding:4px 0;">✅ Once verified, your tier upgrades instantly!</li>
+            </ol>
+        </div>
+        <nav class="bottom-nav">
+            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
+            <a href="/upgrade" class="active"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
+            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
+            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
+        </nav>
+        <script>
+            function showPaymentForm(tier, amount) {
+                document.getElementById('selectedTier').value = tier;
+                document.getElementById('selectedAmount').value = amount;
+                document.getElementById('amountSent').value = amount;
+                document.getElementById('paymentForm').style.display = 'block';
+                document.getElementById('paymentForm').scrollIntoView({ behavior: 'smooth' });
+            }
+            function hidePaymentForm() { document.getElementById('paymentForm').style.display = 'none'; }
+        </script>
+    </div>
+</body>
+</html>
+"""
+
+# WITHDRAW_PAGE
+WITHDRAW_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Withdraw - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Withdraw</span>
+                </div>
+            </div>
+            <div class="user-actions">
+                <div class="user-info">
+                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
+                </div>
+                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="card" style="text-align:center;background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;border:none;">
+            <div style="font-size:14px;opacity:0.8;">💰 Available Balance</div>
+            <div style="font-size:40px;font-weight:800;">₦{{ "%.2f"|format(user.balance) }}</div>
+        </div>
+
+        <div class="withdrawal-info">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:20px;">📅</span>
+                <div>
+                    <strong>Withdrawal Days: 10th & 30th of every month</strong>
+                    <div style="font-size:13px;color:var(--text-light);">
+                        {% if can_withdraw %}
+                            ✅ <span style="color:var(--success);">Today is a withdrawal day!</span>
+                        {% else %}
+                            ⏳ Next withdrawal: <span class="highlight">{{ next_date.strftime('%B %d, %Y') }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <form method="POST">
+                <div class="form-group">
+                    <label>💰 Amount (₦) - Minimum ₦{{ min_amount }}</label>
+                    <input type="number" name="amount" min="{{ min_amount }}" max="{{ user.balance }}" required>
+                    <span class="text-muted" style="font-size:12px;">Minimum: ₦{{ min_amount }}</span>
+                </div>
+                <div class="form-group">
+                    <label>🏛️ Bank Name</label>
+                    <select name="bank_name" required>
+                        <option value="">Select bank</option>
+                        <option value="GTBank">GTBank</option>
+                        <option value="Access Bank">Access Bank</option>
+                        <option value="First Bank">First Bank</option>
+                        <option value="Zenith Bank">Zenith Bank</option>
+                        <option value="UBA">UBA</option>
+                        <option value="PalmPay">PalmPay</option>
+                        <option value="Opay">Opay</option>
+                        <option value="Moniepoint">Moniepoint</option>
+                        <option value="Kuda Bank">Kuda Bank</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>🔢 Account Number</label>
+                    <input type="text" name="account_number" placeholder="10-digit account number" pattern="[0-9]{10}" required>
+                </div>
+                <div class="form-group">
+                    <label>👤 Account Name</label>
+                    <input type="text" name="account_name" placeholder="Full name on account" required>
+                </div>
+                {% if can_withdraw %}
+                    <button type="submit" class="btn btn-success">💸 Request Withdrawal</button>
+                {% else %}
+                    <button type="button" class="btn btn-secondary btn-disabled" style="cursor:not-allowed;">
+                        🔒 Withdrawals on 10th & 30th only
+                    </button>
+                    <p style="font-size:12px;color:var(--text-light);text-align:center;margin-top:8px;">
+                        Next withdrawal: <strong>{{ next_date.strftime('%B %d, %Y') }}</strong>
+                    </p>
+                {% endif %}
+            </form>
+        </div>
+
+        {% if withdrawals %}
+        <div class="card">
+            <h3>📜 Withdrawal History</h3>
+            {% for w in withdrawals %}
+            <div style="padding:8px 0;border-bottom:1px solid var(--border);">
+                <div class="flex-between">
+                    <div>
+                        <strong>₦{{ "%.2f"|format(w.amount) }}</strong>
+                        <span style="margin-left:8px;font-size:12px;color:var(--text-light);">{{ w.bank_name }}</span>
+                    </div>
+                    <div>
+                        <span class="status-badge status-{{ w.status|lower }}">{{ w.status }}</span>
+                    </div>
+                </div>
+                <div class="text-muted" style="font-size:12px;">{{ w.created_at.strftime('%b %d, %Y %H:%M') }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <nav class="bottom-nav">
+            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
+            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
+            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
+            <a href="/withdraw" class="active"><span class="icon">💸</span><span class="label">Withdraw</span></a>
+        </nav>
+    </div>
+</body>
+</html>
+"""
+
+# ACCOUNT_PAGE
+ACCOUNT_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Account</span>
+                </div>
+            </div>
+            <div class="user-actions">
+                <div class="user-info">
+                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
+                </div>
+                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="card"><div style="text-align:center;"><div style="font-size:48px;">👤</div><h2>Account Settings</h2><p class="text-muted">Manage your personal information</p></div></div>
+        <div class="card">
+            <h3>📊 Profile Completion</h3>
+            <div class="profile-completion">
+                <div class="label"><span>{{ completion }}% complete</span><span>{{ completed_fields }}/{{ total_fields }} fields</span></div>
+                <div class="bar"><div class="fill" style="width: {{ completion }}%;"></div></div>
+            </div>
+        </div>
+        <div class="card gradient-border">
+            <h3>📝 Personal Information</h3>
+            <form method="POST" action="/update_account">
+                <div class="form-group"><label>👤 Full Name</label><input type="text" name="full_name" value="{{ user.full_name or '' }}" placeholder="Enter your full name"></div>
+                <div class="form-group"><label>📧 Email</label><input type="email" value="{{ user.email }}" disabled style="opacity:0.7;"></div>
+                <div class="form-group"><label>📱 Phone Number</label><input type="tel" name="phone" value="{{ user.phone or '' }}" placeholder="Enter your phone number"></div>
+                <div class="form-group"><label>📍 Address</label><input type="text" name="address" value="{{ user.address or '' }}" placeholder="Enter your address"></div>
+                <div class="form-group"><label>🎂 Date of Birth</label><input type="date" name="date_of_birth" value="{{ user.date_of_birth.strftime('%Y-%m-%d') if user.date_of_birth else '' }}"></div>
+                <div class="form-group"><label>⚥ Gender</label><select name="gender"><option value="">Select gender</option><option value="Male" {% if user.gender == 'Male' %}selected{% endif %}>Male</option><option value="Female" {% if user.gender == 'Female' %}selected{% endif %}>Female</option><option value="Other" {% if user.gender == 'Other' %}selected{% endif %}>Other</option></select></div>
+                <div class="form-group"><label>💼 Occupation</label><input type="text" name="occupation" value="{{ user.occupation or '' }}" placeholder="Enter your occupation"></div>
+                <button type="submit" class="btn btn-primary">💾 Save Changes</button>
+            </form>
+        </div>
+        <div class="card">
+            <h3>🏦 Bank Details</h3>
+            <form method="POST" action="/update_bank">
+                <div class="form-group"><label>🏛️ Bank Name</label><select name="bank_name"><option value="">Select bank</option><option value="GTBank" {% if user.bank_name == 'GTBank' %}selected{% endif %}>GTBank</option><option value="Access Bank" {% if user.bank_name == 'Access Bank' %}selected{% endif %}>Access Bank</option><option value="First Bank" {% if user.bank_name == 'First Bank' %}selected{% endif %}>First Bank</option><option value="Zenith Bank" {% if user.bank_name == 'Zenith Bank' %}selected{% endif %}>Zenith Bank</option><option value="UBA" {% if user.bank_name == 'UBA' %}selected{% endif %}>UBA</option><option value="PalmPay" {% if user.bank_name == 'PalmPay' %}selected{% endif %}>PalmPay</option><option value="Opay" {% if user.bank_name == 'Opay' %}selected{% endif %}>Opay</option><option value="Moniepoint" {% if user.bank_name == 'Moniepoint' %}selected{% endif %}>Moniepoint</option><option value="Kuda Bank" {% if user.bank_name == 'Kuda Bank' %}selected{% endif %}>Kuda Bank</option></select></div>
+                <div class="form-group"><label>🔢 Account Number</label><input type="text" name="bank_account" value="{{ user.bank_account or '' }}" placeholder="10-digit account number" pattern="[0-9]{10}"></div>
+                <div class="form-group"><label>👤 Account Name</label><input type="text" name="account_name" value="{{ user.account_name or '' }}" placeholder="Full name on account"></div>
+                <button type="submit" class="btn btn-success">💾 Save Bank Details</button>
+            </form>
+        </div>
+        <div class="card">
+            <h3>🎨 Theme Preference</h3>
+            <div style="display:flex;gap:12px;margin-top:8px;">
+                <form method="POST" action="/set_theme" style="flex:1;"><input type="hidden" name="theme" value="light"><button type="submit" class="btn btn-secondary" style="{% if user.theme == 'light' %}border:2px solid var(--primary);{% endif %}">☀️ Light</button></form>
+                <form method="POST" action="/set_theme" style="flex:1;"><input type="hidden" name="theme" value="dark"><button type="submit" class="btn btn-secondary" style="{% if user.theme == 'dark' %}border:2px solid var(--primary);{% endif %}">🌙 Dark</button></form>
+            </div>
+        </div>
+        <div class="card" style="border:2px solid var(--danger);"><h3 style="color:var(--danger);">🔒 Security</h3><a href="/change_password" class="btn btn-danger">🔑 Change Password</a></div>
+        <nav class="bottom-nav">
+            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
+            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
+            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
+            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
+        </nav>
+    </div>
+</body>
+</html>
+"""
+
+# CHANGE_PASSWORD_PAGE
+CHANGE_PASSWORD_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Change Password</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Security</span>
+                </div>
+            </div>
+            <a href="/account" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="card gradient-border">
+            <form method="POST">
+                <div class="form-group"><label>🔑 Current Password</label><input type="password" name="current_password" required></div>
+                <div class="form-group"><label>🔐 New Password</label><input type="password" name="new_password" required minlength="6"></div>
+                <div class="form-group"><label>✅ Confirm New Password</label><input type="password" name="confirm_password" required></div>
+                <button type="submit" class="btn btn-primary">Update Password</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# SUPPORT_PAGE
+SUPPORT_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Support - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Support</span>
+                </div>
+            </div>
+            <div class="user-actions">
+                <div class="user-info">
+                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
+                </div>
+                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="card" style="text-align:center;"><div style="font-size:48px;">💬</div><h2>Support Center</h2><p class="text-muted">We're here to help! Send us your questions or complaints.</p></div>
+        <div class="card gradient-border">
+            <h3>📝 Submit a Ticket</h3>
+            <form method="POST" action="/submit_support">
+                <div class="form-group"><label>📌 Subject</label><input type="text" name="subject" placeholder="Brief title of your issue" required></div>
+                <div class="form-group"><label>🚨 Priority</label><select name="priority" required><option value="LOW">Low - General question</option><option value="MEDIUM" selected>Medium - Need help</option><option value="HIGH">High - Urgent issue</option><option value="CRITICAL">Critical - Account problem</option></select></div>
+                <div class="form-group"><label>📝 Message</label><textarea name="message" placeholder="Describe your issue in detail..." required></textarea></div>
+                <button type="submit" class="btn btn-primary">🚀 Submit Ticket</button>
+            </form>
+        </div>
+        <div class="card" style="background:linear-gradient(135deg,#FEF3C7,#FCD34D);border:2px solid var(--secondary);">
+            <h3>💡 Quick Help</h3>
+            <div style="margin-top:8px;"><div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.1);"><span style="font-size:20px;">📖</span><div><strong>Check FAQ</strong><br><span class="text-muted">Common questions answered</span></div></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.1);"><span style="font-size:20px;">📧</span><div><strong>Email Us</strong><br><span class="text-muted">support@earnnpay.com</span></div></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:8px 0;"><span style="font-size:20px;">💬</span><div><strong>Live Chat</strong><br><span class="text-muted">Available 9AM - 6PM</span></div></div></div>
+        </div>
+        <div class="card">
+            <h3>📜 Your Tickets</h3>
+            {% if tickets %}
+                {% for ticket in tickets %}
+                <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+                    <div class="flex-between"><div><strong>{{ ticket.subject }}</strong><span class="status-badge status-{{ ticket.status|lower }}">{{ ticket.status }}</span></div><span style="font-size:11px;color:var(--text-light);">{{ ticket.date }}</span></div>
+                    <div class="text-muted" style="font-size:12px;margin-top:4px;">Priority: <span style="font-weight:600;">{{ ticket.priority }}</span></div>
+                    <div style="font-size:13px;margin-top:4px;color:var(--text);">{{ ticket.message[:100] }}{% if ticket.message|length > 100 %}...{% endif %}</div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p class="text-center text-muted">📭 No tickets submitted yet</p>
+            {% endif %}
+        </div>
+        <nav class="bottom-nav">
+            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
+            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
+            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
+            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
+        </nav>
+    </div>
+</body>
+</html>
+"""
+
+# ADMIN_LOGIN_PAGE
+ADMIN_LOGIN_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body>
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>🔐</span></div>
+                <div class="logo-text">
+                    <span class="main">Admin Panel</span>
+                    <span class="sub">Earn'n'Pay <span>•</span> Login</span>
+                </div>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="card gradient-border">
+            <h2>🔐 Admin Login</h2>
+            <form method="POST">
+                <div class="form-group"><label>👤 Username</label><input type="text" name="username" required></div>
+                <div class="form-group"><label>🔑 Password</label><input type="password" name="password" required></div>
+                <button type="submit" class="btn btn-primary">🚀 Login</button>
+            </form>
+            <p class="text-center mt-2">Default: admin / admin123</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# ADMIN_DASHBOARD_PAGE
+ADMIN_DASHBOARD_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body>
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>🔐</span></div>
+                <div class="logo-text">
+                    <span class="main">Admin Panel</span>
+                    <span class="sub">Earn'n'Pay <span>•</span> Dashboard</span>
+                </div>
+            </div>
+            <div><span style="font-size:14px;font-weight:600;">👋 Admin</span><a href="/admin/logout" style="margin-left:8px;color:var(--danger);text-decoration:none;font-size:12px;">🚪 Logout</a></div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="stats-grid" style="margin-bottom:16px;">
+            <div class="stat-box" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;"><div class="value" style="color:white;font-size:32px;">{{ total_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">👥 Total Users</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#F59E0B,#D97706);color:white;"><div class="value" style="color:white;font-size:32px;">{{ pending_count }}</div><div class="label" style="color:rgba(255,255,255,0.8);">⏳ Pending</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#10B981,#059669);color:white;"><div class="value" style="color:white;font-size:32px;">{{ verified_count }}</div><div class="label" style="color:rgba(255,255,255,0.8);">✅ Verified</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#EF4444,#DC2626);color:white;"><div class="value" style="color:white;font-size:32px;">{{ open_tickets }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💬 Tickets</div></div>
+        </div>
+        <div class="card">
+            <h3>📊 Payment Requests</h3>
+            {% if pending_transactions %}
+                {% for tx in pending_transactions %}
+                <div style="padding:12px 0;border-bottom:1px solid var(--border);">
+                    <div class="flex-between">
+                        <div><strong>{{ tx.username }}</strong><span class="tier-badge tier-{{ tx.tier|lower }}">{{ tx.tier }}</span></div>
+                        <div><span style="font-weight:600;">₦{{ "%.2f"|format(tx.amount) }}</span></div>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-light);margin-top:4px;">Ref: {{ tx.transaction_id }} · {{ tx.date }}</div>
+                    <div style="margin-top:8px;display:flex;gap:8px;">
+                        <form method="POST" action="/admin/verify_payment/{{ tx.id }}" style="flex:1;"><button type="submit" class="btn btn-success btn-sm">✅ Verify</button></form>
+                        <form method="POST" action="/admin/reject_payment/{{ tx.id }}" style="flex:1;"><button type="submit" class="btn btn-danger btn-sm">❌ Reject</button></form>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p class="text-center text-muted">🎉 No pending payments</p>
+            {% endif %}
+        </div>
+        <div class="card">
+            <h3>📊 All Users</h3>
+            {% for user in all_users %}
+            <div style="padding:8px 0;border-bottom:1px solid var(--border);">
+                <div class="flex-between">
+                    <div><strong>{{ user.username }}</strong><span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span><span style="font-size:10px;color:#10B981;margin-left:4px;">+₦{{ "%.0f"|format(user.referral_bonus_earned) }}</span></div>
+                    <div style="text-align:right;"><div style="font-size:12px;">💰 ₦{{ "%.2f"|format(user.balance) }}</div><div style="font-size:12px;color:var(--text-light);">⭐ {{ user.trust_score }} pts</div></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <nav class="bottom-nav">
+            <a href="/" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/admin/users" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">📊</span><span class="label">Users</span></a>
+            <a href="/admin/support" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">💬</span><span class="label">Support</span></a>
+            <a href="/admin/settings" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">⚙️</span><span class="label">Settings</span></a>
+            <a href="/admin/dashboard" class="active" style="flex:1.2;text-align:center;padding:6px 10px;text-decoration:none;color:white;font-size:8px;background:linear-gradient(135deg,#6C3CE1,#8B5CF6);border-radius:50px;box-shadow:0 4px 20px rgba(108,60,225,0.4);"><span class="icon">🔐</span><span class="label">Admin</span></a>
+        </nav>
+    </div>
+</body>
+</html>
+"""
+
+# ADMIN_USERS_PAGE
+ADMIN_USERS_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All Users - Admin</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body>
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>📊</span></div>
+                <div class="logo-text">
+                    <span class="main">All Users</span>
+                    <span class="sub">Earn'n'Pay <span>•</span> Admin</span>
+                </div>
+            </div>
+            <div><a href="/admin/dashboard" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a><a href="/admin/logout" class="btn btn-sm btn-danger" style="width:auto;padding:8px 16px;">🚪</a></div>
+        </div>
+        <div class="stats-grid" style="margin-bottom:16px;">
+            <div class="stat-box" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;"><div class="value" style="color:white;font-size:32px;">{{ total_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">👥 Total</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#F59E0B,#D97706);color:white;"><div class="value" style="color:white;font-size:32px;">{{ free_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">🆓 Free</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#10B981,#059669);color:white;"><div class="value" style="color:white;font-size:32px;">{{ paid_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💎 Paid</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#EF4444,#DC2626);color:white;"><div class="value" style="color:white;font-size:32px;">₦{{ total_balance }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💰 Balance</div></div>
+        </div>
+        <div class="card" style="overflow-x:auto;">
+            <h3>📊 Registered Users</h3>
+            <table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;">
+                <thead><tr style="background:var(--primary);color:white;"><th style="padding:10px;text-align:left;">ID</th><th style="padding:10px;text-align:left;">Username</th><th style="padding:10px;text-align:left;">Email</th><th style="padding:10px;text-align:left;">Tier</th><th style="padding:10px;text-align:left;">Balance</th><th style="padding:10px;text-align:left;">Trust</th><th style="padding:10px;text-align:left;">Refs</th><th style="padding:10px;text-align:left;">Joined</th></tr></thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr style="border-bottom:1px solid var(--border);">
+                        <td style="padding:10px;">{{ user.id }}</td>
+                        <td style="padding:10px;font-weight:600;">{{ user.username }}</td>
+                        <td style="padding:10px;font-size:12px;">{{ user.email }}</td>
+                        <td style="padding:10px;"><span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span></td>
+                        <td style="padding:10px;">₦{{ "%.2f"|format(user.balance) }}</td>
+                        <td style="padding:10px;">⭐ {{ user.trust_score }}</td>
+                        <td style="padding:10px;">{{ user.total_referrals }}</td>
+                        <td style="padding:10px;font-size:11px;color:var(--text-light);">{{ user.created_at.strftime('%b %d, %Y') if user.created_at else 'N/A' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div style="margin-top:16px;padding:12px;background:var(--bg);border-radius:8px;text-align:center;font-size:13px;color:var(--text-light);">📊 Total: {{ total_users }} · Balance: ₦{{ total_balance }}</div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# ADMIN_SETTINGS_PAGE
+ADMIN_SETTINGS_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Settings - Admin</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body>
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>⚙️</span></div>
+                <div class="logo-text">
+                    <span class="main">Payment Settings</span>
+                    <span class="sub">Earn'n'Pay <span>•</span> Admin</span>
+                </div>
+            </div>
+            <div><a href="/admin/dashboard" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a><a href="/admin/logout" class="btn btn-sm btn-danger" style="width:auto;padding:8px 16px;">🚪</a></div>
+        </div>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="card gradient-border">
+            <h3>🏦 Update Payment Details</h3>
+            <p class="text-muted">These bank details will be shown to users when they want to upgrade their tier.</p>
+            <form method="POST" action="/admin/update_payment_settings">
+                <div class="form-group">
+                    <label>🏛️ Bank Name</label>
+                    <input type="text" name="bank_name" value="{{ settings.bank_name }}" required>
+                </div>
+                <div class="form-group">
+                    <label>👤 Account Name</label>
+                    <input type="text" name="account_name" value="{{ settings.account_name }}" required>
+                </div>
+                <div class="form-group">
+                    <label>🔢 Account Number</label>
+                    <input type="text" name="account_number" value="{{ settings.account_number }}" required pattern="[0-9]{10}">
+                    <span class="text-muted" style="font-size:12px;">10-digit account number</span>
+                </div>
+                <button type="submit" class="btn btn-primary">💾 Update Payment Details</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h3>📋 Current Payment Details</h3>
+            <div class="bank-details-box">
+                <div><span class="label">🏛️ Bank:</span> <span class="value">{{ settings.bank_name }}</span></div>
+                <div><span class="label">👤 Account Name:</span> <span class="value">{{ settings.account_name }}</span></div>
+                <div><span class="label">🔢 Account Number:</span> <span class="value" style="color:var(--primary);">{{ settings.account_number }}</span></div>
+            </div>
+            <p class="text-muted" style="font-size:12px;text-align:center;">Last updated: {{ settings.updated_at.strftime('%b %d, %Y %H:%M') if settings.updated_at else 'N/A' }}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# ==================== ROUTES ====================
+
+@app.route('/')
+def home():
+    if 'username' in session:
+        return redirect('/dashboard')
+    return render_template_string(LANDING_PAGE, reviews=FAKE_REVIEWS, google_reviews=GOOGLE_REVIEWS)
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        confirm = request.form.get('confirm_password')
+        
+        if password != confirm:
+            flash('❌ Passwords do not match!', 'error')
+            return redirect('/register')
+        
+        if User.query.filter_by(username=username).first():
+            flash('❌ Username already taken!', 'error')
+            return redirect('/register')
+        
+        if User.query.filter_by(email=email).first():
+            flash('❌ Email already registered!', 'error')
+            return redirect('/register')
+        
+        user = User(username=username, email=email)
+        user.set_password(password)
+        user.referral_code = user.generate_referral_code()
+        
+        ref_code = request.args.get('ref', '')
+        if ref_code:
+            referrer = User.query.filter_by(referral_code=ref_code).first()
+            if referrer:
+                user.referred_by = referrer.id
+                bonus_amount = REFERRAL_BONUS
+                referrer.balance += bonus_amount
+                referrer.commission_balance += bonus_amount
+                referrer.trust_score += 1
+                referrer.referral_bonus_earned += bonus_amount
+                referrer.total_referrals += 1
+                db.session.add(referrer)
+                flash(f'🎉 You were referred by {referrer.username}! You both get ₦{bonus_amount}!', 'success')
+            else:
+                flash('Invalid referral code!', 'error')
+        else:
+            flash('✅ Registration successful! Please login.', 'success')
+        
+        db.session.add(user)
+        db.session.commit()
+        return redirect('/login')
+    
+    return render_template_string(REGISTER_PAGE)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        user = User.query.filter_by(username=username).first()
+        if user and user.check_password(password):
+            session['username'] = username
+            session['user_id'] = user.id
+            flash('👋 Welcome back!', 'success')
+            return redirect('/dashboard')
+        
+        flash('❌ Invalid username or password!', 'error')
+    
+    return render_template_string(LOGIN_PAGE)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('👋 Logged out successfully', 'success')
+    return redirect('/login')
+
+@app.route('/dashboard')
+def dashboard():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    now = datetime.now()
+    if user.last_task_reset:
+        if now - user.last_task_reset >= timedelta(hours=24):
+            user.daily_tasks_completed = 0
+            user.last_task_reset = now
+            db.session.commit()
+    else:
+        user.last_task_reset = now
+        db.session.commit()
+    
+    today = datetime.now().date()
+    if user.last_checkin:
+        if user.last_checkin.date() == today - timedelta(days=1):
+            user.streak_days += 1
+            user.trust_score += 1
+        elif user.last_checkin.date() != today:
+            user.streak_days = 0
+    user.last_checkin = datetime.now()
+    
+    if user.last_checkin.date() != today:
+        user.daily_tasks_completed = 0
+    
+    db.session.commit()
+    
+    next_tier, needed_points = get_next_tier_info(user.tier, user.trust_score)
+    
+    if next_tier:
+        next_threshold = TIER_THRESHOLDS[next_tier]
+        current_threshold = TIER_THRESHOLDS[user.tier]
+        progress = min(100, ((user.trust_score - current_threshold) / (next_threshold - current_threshold) * 100) if next_threshold > current_threshold else 0)
+    else:
+        progress = 100
+    
+    today_tasks = TaskCompletion.query.filter(
+        TaskCompletion.user_id == user.id,
+        db.func.date(TaskCompletion.completed_at) == today
+    ).count()
+    
+    remaining = max(0, user.daily_limit - today_tasks)
+    
+    if user.last_task_reset:
+        next_reset = user.last_task_reset + timedelta(hours=24)
+        time_left = next_reset - now
+        hours = int(time_left.total_seconds() // 3600)
+        minutes = int((time_left.total_seconds() % 3600) // 60)
+        reset_time = f"{hours}h {minutes}m"
+    else:
+        reset_time = "24h 0m"
+    
+    return render_template_string(DASHBOARD_PAGE,
+        user=user,
+        session=session,
+        progress=progress,
+        needed_points=needed_points,
+        next_tier=next_tier,
+        today_tasks=today_tasks,
+        remaining_tasks=remaining,
+        total_referrals=user.total_referrals,
+        reset_time=reset_time
+    )
+
+@app.route('/account')
+def account_page():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    completion = user.get_profile_completion()
+    total_fields = 6
+    completed_fields = sum(1 for field in ['full_name', 'phone', 'address', 'bank_name', 'bank_account', 'account_name'] if getattr(user, field))
+    
+    return render_template_string(ACCOUNT_PAGE,
+        user=user,
+        completion=completion,
+        completed_fields=completed_fields,
+        total_fields=total_fields
+    )
+
+@app.route('/update_account', methods=['POST'])
+def update_account():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    user.full_name = request.form.get('full_name')
+    user.phone = request.form.get('phone')
+    user.address = request.form.get('address')
+    user.occupation = request.form.get('occupation')
+    user.gender = request.form.get('gender')
+    
+    dob = request.form.get('date_of_birth')
+    if dob:
+        user.date_of_birth = datetime.strptime(dob, '%Y-%m-%d').date()
+    
+    db.session.commit()
+    flash('✅ Account information updated successfully!', 'success')
+    return redirect('/account')
+
+@app.route('/update_bank', methods=['POST'])
+def update_bank():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    user.bank_name = request.form.get('bank_name')
+    user.bank_account = request.form.get('bank_account')
+    user.account_name = request.form.get('account_name')
+    
+    db.session.commit()
+    flash('✅ Bank details updated successfully!', 'success')
+    return redirect('/account')
+
+@app.route('/set_theme', methods=['POST'])
+def set_theme():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    user.theme = request.form.get('theme', 'light')
+    db.session.commit()
+    flash(f'✅ Theme set to {user.theme} mode!', 'success')
+    referer = request.referrer or '/account'
+    return redirect(referer)
+
+@app.route('/change_password', methods=['GET', 'POST'])
+def change_password():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    if request.method == 'POST':
+        current = request.form.get('current_password')
+        new = request.form.get('new_password')
+        confirm = request.form.get('confirm_password')
+        
+        if not user.check_password(current):
+            flash('❌ Current password is incorrect!', 'error')
+            return redirect('/change_password')
+        
+        if new != confirm:
+            flash('❌ New passwords do not match!', 'error')
+            return redirect('/change_password')
+        
+        if len(new) < 6:
+            flash('❌ Password must be at least 6 characters!', 'error')
+            return redirect('/change_password')
+        
+        user.set_password(new)
+        db.session.commit()
+        flash('✅ Password changed successfully!', 'success')
+        return redirect('/account')
+    
+    return render_template_string(CHANGE_PASSWORD_PAGE, user=user)
+
+@app.route('/support', methods=['GET'])
+def support_page():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    tickets = SupportTicket.query.filter_by(user_id=user.id).order_by(SupportTicket.created_at.desc()).all()
+    ticket_list = [t.to_dict() for t in tickets]
+    
+    return render_template_string(SUPPORT_PAGE, user=user, tickets=ticket_list)
+
+@app.route('/submit_support', methods=['POST'])
+def submit_support():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    subject = request.form.get('subject')
+    message = request.form.get('message')
+    priority = request.form.get('priority', 'MEDIUM')
+    
+    if not subject or not message:
+        flash('❌ Please fill in all fields!', 'error')
+        return redirect('/support')
+    
+    ticket = SupportTicket(
+        user_id=user.id,
+        subject=subject,
+        message=message,
+        priority=priority,
+        status='OPEN'
+    )
+    db.session.add(ticket)
+    db.session.commit()
+    
+    flash('✅ Your support ticket has been submitted!', 'success')
+    return redirect('/support')
+
+@app.route('/earn')
+def earn():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    now = datetime.now()
+    if user.last_task_reset:
+        if now - user.last_task_reset >= timedelta(hours=24):
+            user.daily_tasks_completed = 0
+            user.last_task_reset = now
+            db.session.commit()
+    else:
+        user.last_task_reset = now
+        db.session.commit()
+    
+    tasks = Task.query.filter_by(tier_required=user.tier, is_active=True).all()
+    
+    today = datetime.now().date()
+    completed = TaskCompletion.query.filter(
+        TaskCompletion.user_id == user.id,
+        db.func.date(TaskCompletion.completed_at) == today
+    ).all()
+    
+    completed_ids = [c.task_id for c in completed]
+    remaining = max(0, user.daily_limit - len(completed))
+    
+    return render_template_string(EARN_PAGE,
+        user=user,
+        tasks=tasks,
+        completed_ids=completed_ids,
+        remaining=remaining
+    )
+
+@app.route('/complete_task/<int:task_id>', methods=['POST'])
+def complete_task(task_id):
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    now = datetime.now()
+    if user.last_task_reset:
+        if now - user.last_task_reset >= timedelta(hours=24):
+            user.daily_tasks_completed = 0
+            user.last_task_reset = now
+            db.session.commit()
+    
+    task = Task.query.get_or_404(task_id)
+    
+    today = datetime.now().date()
+    today_tasks = TaskCompletion.query.filter(
+        TaskCompletion.user_id == user.id,
+        db.func.date(TaskCompletion.completed_at) == today
+    ).count()
+    
+    if today_tasks >= user.daily_limit:
+        flash('⛔ Daily task limit reached!', 'error')
+        return redirect('/earn')
+    
+    completion = TaskCompletion(
+        user_id=user.id,
+        task_id=task.id,
+        proof_text='Completed'
+    )
+    db.session.add(completion)
+    
+    user.balance += task.reward
+    user.trust_score += 1
+    
+    new_tier = get_tier_from_score(user.trust_score)
+    if new_tier != user.tier:
+        user.tier = new_tier
+        user.daily_limit = TIER_TASKS.get(new_tier, 2)
+        flash(f'🎉 Congratulations! You\'ve been upgraded to {new_tier.title()} tier!', 'success')
+    
+    user.daily_tasks_completed += 1
+    db.session.commit()
+    
+    flash(f'✅ Task completed! +₦{task.reward}', 'success')
+    return redirect('/earn')
+
+@app.route('/referral')
+def referral_page():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    referrals = Referral.query.filter_by(referrer_id=user.id).all()
+    
+    referred_users = []
+    downline = {'FREE': 0, 'BEGINNER': 0, 'EXPERT': 0, 'LEGEND': 0}
+    
+    for ref in referrals:
+        referred = User.query.get(ref.referred_id)
+        if referred:
+            referred_users.append(referred)
+            downline[referred.tier] += 1
+    
+    return render_template_string(REFERRAL_PAGE,
+        user=user,
+        referral_link=f"http://127.0.0.1:5000/register?ref={user.referral_code}",
+        referrals=referred_users,
+        total_invites=len(referrals),
+        verified_users=sum(1 for r in referrals if r.verified),
+        downline=downline
+    )
+
+@app.route('/upgrade')
+def upgrade_page():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    tiers = {
+        'BEGINNER': {'name': 'Beginner', 'cost': 1000, 'daily_limit': 6, 'description': '6 tasks/day · reviews up to ₦150'},
+        'EXPERT': {'name': 'Expert', 'cost': 3500, 'daily_limit': 10, 'description': '10 tasks/day · reviews up to ₦450'},
+        'LEGEND': {'name': 'Legend', 'cost': 10000, 'daily_limit': 15, 'description': '15 tasks/day · reviews up to ₦1,000'}
+    }
+    
+    user_transactions = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.created_at.desc()).limit(5).all()
+    
+    return render_template_string(UPGRADE_PAGE,
+        user=user,
+        tiers=tiers,
+        transactions_list=[t.to_dict() for t in user_transactions],
+        get_payment_settings=get_payment_settings
+    )
+
+@app.route('/submit_payment', methods=['POST'])
+def submit_payment():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    tier = request.form.get('tier')
+    amount = float(request.form.get('amount', 0))
+    sender_name = request.form.get('sender_name')
+    transaction_id = request.form.get('transaction_id')
+    amount_sent = float(request.form.get('amount_sent', 0))
+    payment_date = request.form.get('payment_date')
+    notes = request.form.get('notes', '')
+    
+    if Transaction.query.filter_by(transaction_id=transaction_id).first():
+        flash('❌ This transaction ID already exists!', 'error')
+        return redirect('/upgrade')
+    
+    tx = Transaction(
+        user_id=user.id,
+        amount=amount,
+        tier=tier,
+        transaction_id=transaction_id,
+        sender_name=sender_name,
+        payment_date=datetime.strptime(payment_date, '%Y-%m-%dT%H:%M'),
+        notes=notes,
+        status='PENDING'
+    )
+    db.session.add(tx)
+    db.session.commit()
+    
+    flash('✅ Payment proof submitted! Please wait for admin verification.', 'success')
+    return redirect('/upgrade')
+
+@app.route('/withdraw', methods=['GET', 'POST'])
+def withdraw_page():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    withdrawals = Withdrawal.query.filter_by(user_id=user.id).order_by(Withdrawal.created_at.desc()).limit(10).all()
+    
+    can_withdraw = can_withdraw_today()
+    next_date = get_next_withdrawal_date()
+    min_amount = MINIMUM_WITHDRAWAL
+    
+    if request.method == 'POST':
+        if not can_withdraw:
+            flash(f'❌ Withdrawals are only allowed on the 10th and 30th of each month. Next withdrawal date: {next_date.strftime("%B %d, %Y")}', 'error')
+            return redirect('/withdraw')
+        
+        amount = float(request.form.get('amount', 0))
+        bank_name = request.form.get('bank_name')
+        account_number = request.form.get('account_number')
+        account_name = request.form.get('account_name')
+        
+        if amount < min_amount:
+            flash(f'❌ Minimum withdrawal is ₦{min_amount:,}!', 'error')
+            return redirect('/withdraw')
+        
+        if amount > user.balance:
+            flash('❌ Insufficient balance!', 'error')
+            return redirect('/withdraw')
+        
+        withdrawal = Withdrawal(
+            user_id=user.id,
+            amount=amount,
+            bank_name=bank_name,
+            account_number=account_number,
+            account_name=account_name,
+            reference=f"WDL-{user.id}-{random.randint(1000,9999)}"
+        )
+        db.session.add(withdrawal)
+        
+        user.balance -= amount
+        db.session.commit()
+        
+        flash(f'💸 Withdrawal of ₦{amount:,.2f} requested!', 'success')
+        return redirect('/dashboard')
+    
+    return render_template_string(WITHDRAW_PAGE,
+        user=user,
+        withdrawals=withdrawals,
+        can_withdraw=can_withdraw,
+        next_date=next_date,
+        min_amount=min_amount
+    )
+
+# ==================== ADMIN ROUTES ====================
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            session['admin'] = True
+            flash('✅ Admin login successful!', 'success')
+            return redirect('/admin/dashboard')
+        
+        flash('❌ Invalid admin credentials!', 'error')
+    
+    return render_template_string(ADMIN_LOGIN_PAGE)
+
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('admin', None)
+    flash('👋 Admin logged out', 'success')
+    return redirect('/')
+
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    pending = Transaction.query.filter_by(status='PENDING').all()
+    all_users = User.query.all()
+    verified_count = Transaction.query.filter_by(status='VERIFIED').count()
+    total_withdrawals = Withdrawal.query.count()
+    open_tickets = SupportTicket.query.filter_by(status='OPEN').count()
+    
+    return render_template_string(ADMIN_DASHBOARD_PAGE,
+        pending_transactions=pending,
+        pending_count=len(pending),
+        verified_count=verified_count,
+        total_withdrawals=total_withdrawals,
+        total_users=len(all_users),
+        all_users=all_users,
+        open_tickets=open_tickets
+    )
+
+@app.route('/admin/users')
+def admin_users():
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    all_users = User.query.order_by(User.id.desc()).all()
+    total_balance = sum(u.balance for u in all_users)
+    free_users = sum(1 for u in all_users if u.tier == 'FREE')
+    paid_users = len(all_users) - free_users
+    
+    return render_template_string(ADMIN_USERS_PAGE,
+        users=all_users,
+        total_users=len(all_users),
+        free_users=free_users,
+        paid_users=paid_users,
+        total_balance=total_balance
+    )
+
+@app.route('/admin/settings')
+def admin_settings():
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    settings = get_payment_settings()
+    return render_template_string(ADMIN_SETTINGS_PAGE, settings=settings)
+
+@app.route('/admin/update_payment_settings', methods=['POST'])
+def update_payment_settings():
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    bank_name = request.form.get('bank_name')
+    account_name = request.form.get('account_name')
+    account_number = request.form.get('account_number')
+    
+    settings = get_payment_settings()
+    settings.bank_name = bank_name
+    settings.account_name = account_name
+    settings.account_number = account_number
+    db.session.commit()
+    
+    flash('✅ Payment details updated successfully!', 'success')
+    return redirect('/admin/settings')
+
+@app.route('/admin/support')
+def admin_support():
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    tickets = SupportTicket.query.order_by(SupportTicket.created_at.desc()).all()
+    ticket_list = [t.to_dict() for t in tickets]
+    
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Support Tickets - Admin</title>
+        <style>""" + STYLES + """</style>
+    </head>
+    <body>
+        <div class="page-transition">
+            <div class="top-header">
+                <div class="logo-container">
+                    <div class="logo-icon"><span>💬</span></div>
+                    <div class="logo-text">
+                        <span class="main">Support Tickets</span>
+                        <span class="sub">Earn'n'Pay <span>•</span> Admin</span>
+                    </div>
+                </div>
+                <div><a href="/admin/dashboard" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a><a href="/admin/logout" class="btn btn-sm btn-danger" style="width:auto;padding:8px 16px;">🚪</a></div>
+            </div>
+            <div class="stats-grid" style="margin-bottom:16px;">
+                <div class="stat-box" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;"><div class="value" style="color:white;font-size:32px;">""" + str(len(tickets)) + """</div><div class="label" style="color:rgba(255,255,255,0.8);">📊 Total</div></div>
+                <div class="stat-box" style="background:linear-gradient(135deg,#F59E0B,#D97706);color:white;"><div class="value" style="color:white;font-size:32px;">""" + str(sum(1 for t in tickets if t.status == 'OPEN')) + """</div><div class="label" style="color:rgba(255,255,255,0.8);">🟡 Open</div></div>
+                <div class="stat-box" style="background:linear-gradient(135deg,#10B981,#059669);color:white;"><div class="value" style="color:white;font-size:32px;">""" + str(sum(1 for t in tickets if t.status == 'RESOLVED')) + """</div><div class="label" style="color:rgba(255,255,255,0.8);">✅ Resolved</div></div>
+                <div class="stat-box" style="background:linear-gradient(135deg,#EF4444,#DC2626);color:white;"><div class="value" style="color:white;font-size:32px;">""" + str(sum(1 for t in tickets if t.priority == 'CRITICAL')) + """</div><div class="label" style="color:rgba(255,255,255,0.8);">🔴 Critical</div></div>
+            </div>
+            <div class="card">
+                <h3>📋 All Tickets</h3>
+                {% for ticket in tickets %}
+                <div style="padding:12px 0;border-bottom:1px solid var(--border);">
+                    <div class="flex-between"><div><strong>{{ ticket.subject }}</strong><span class="status-badge status-{{ ticket.status|lower }}">{{ ticket.status }}</span><span class="tier-badge tier-free" style="font-size:9px;">{{ ticket.priority }}</span></div><div style="font-size:11px;color:var(--text-light);">{{ ticket.date }}</div></div>
+                    <div style="font-size:13px;color:var(--text-light);margin:4px 0;">From: <strong>{{ ticket.username }}</strong></div>
+                    <div style="font-size:14px;margin:4px 0;">{{ ticket.message }}</div>
+                    <div style="margin-top:8px;display:flex;gap:8px;">
+                        <form method="POST" action="/admin/resolve_ticket/{{ ticket.id }}" style="flex:1;"><button type="submit" class="btn btn-success btn-sm">✅ Resolve</button></form>
+                        <form method="POST" action="/admin/delete_ticket/{{ ticket.id }}" style="flex:1;"><button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete this ticket?')">🗑️ Delete</button></form>
+                    </div>
+                </div>
+                {% else %}
+                <p class="text-center text-muted">📭 No tickets yet</p>
+                {% endfor %}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return render_template_string(html, tickets=ticket_list)
+
+@app.route('/admin/resolve_ticket/<int:ticket_id>', methods=['POST'])
+def resolve_ticket(ticket_id):
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    ticket = SupportTicket.query.get_or_404(ticket_id)
+    ticket.status = 'RESOLVED'
+    db.session.commit()
+    
+    flash('✅ Ticket resolved!', 'success')
+    return redirect('/admin/support')
+
+@app.route('/admin/delete_ticket/<int:ticket_id>', methods=['POST'])
+def delete_ticket(ticket_id):
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    ticket = SupportTicket.query.get_or_404(ticket_id)
+    db.session.delete(ticket)
+    db.session.commit()
+    
+    flash('🗑️ Ticket deleted!', 'info')
+    return redirect('/admin/support')
+
+@app.route('/admin/verify_payment/<int:tx_id>', methods=['POST'])
+def verify_payment(tx_id):
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    tx = Transaction.query.get_or_404(tx_id)
+    tx.status = 'VERIFIED'
+    
+    user = User.query.get(tx.user_id)
+    if user:
+        tier = tx.tier
+        tier_limits = {'BEGINNER': 6, 'EXPERT': 10, 'LEGEND': 15}
+        user.tier = tier
+        user.daily_limit = tier_limits.get(tier, 2)
+        db.session.commit()
+        flash(f'✅ {user.username} upgraded to {tier.title()}! Now has {user.daily_limit} tasks per day!', 'success')
+    
+    db.session.commit()
+    return redirect('/admin/dashboard')
+
+@app.route('/admin/reject_payment/<int:tx_id>', methods=['POST'])
+def reject_payment(tx_id):
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    tx = Transaction.query.get_or_404(tx_id)
+    tx.status = 'REJECTED'
+    db.session.commit()
+    
+    flash('❌ Payment rejected!', 'info')
+    return redirect('/admin/dashboard')
+
+# ==================== CATCH-ALL ROUTE ====================
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def catch_all(path):
+    if 'username' in session:
+        return redirect('/dashboard')
+    return redirect('/')
+
+# ==================== RUN ====================
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("💰 Earn'n'Pay Labs - COMPLETE ULTIMATE VERSION")
+    print("=" * 60)
+    print("✅ Server starting...")
+    print("🌐 Open your browser and go to: http://127.0.0.1:5000")
+    print("=" * 60)
+    print("📄 ALL PAGES FULLY DEFINED:")
+    print("   / - LANDING_PAGE (Home)")
+    print("   /login - LOGIN_PAGE")
+    print("   /register - REGISTER_PAGE")
+    print("   /dashboard - DASHBOARD_PAGE")
+    print("   /earn - EARN_PAGE")
+    print("   /referral - REFERRAL_PAGE")
+    print("   /upgrade - UPGRADE_PAGE")
+    print("   /withdraw - WITHDRAW_PAGE")
+    print("   /account - ACCOUNT_PAGE")
+    print("   /change_password - CHANGE_PASSWORD_PAGE")
+    print("   /support - SUPPORT_PAGE")
+    print("   /admin/login - ADMIN_LOGIN_PAGE")
+    print("   /admin/dashboard - ADMIN_DASHBOARD_PAGE")
+    print("   /admin/users - ADMIN_USERS_PAGE")
+    print("   /admin/settings - ADMIN_SETTINGS_PAGE")
+    print("   /admin/support - ADMIN_SUPPORT_PAGE")
+    print("=" * 60)
+    print("📊 TRUST SCORE TIERS:")
+    print(f"   FREE: 0 points")
+    print(f"   BEGINNER: 100 points")
+    print(f"   EXPERT: 300 points")
+    print(f"   LEGEND: 700 points")
+    print("=" * 60)
+    print("📅 Withdrawal Settings:")
+    print(f"   Minimum: ₦{MINIMUM_WITHDRAWAL:,}")
+    print(f"   Days: 10th and 30th of every month")
+    print("=" * 60)
+    print("🔐 Admin Panel:")
+    print(f"   URL: http://127.0.0.1:5000/admin/login")
+    print(f"   Username: {ADMIN_USERNAME}")
+    print(f"   Password: {ADMIN_PASSWORD}")
+    print("=" * 60)
+    print("🛑 Press CTRL+C to stop the server")
+    print("=" * 60)
+    app.run(host='0.0.0.0', port=5000)
