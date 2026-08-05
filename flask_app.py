@@ -3266,7 +3266,7 @@ def referral_page():
     
     return render_template_string(REFERRAL_PAGE,
         user=user,
-        referral_link=f"http://127.0.0.1:5000/register?ref={user.referral_code}",
+        referral_link=f"http://earnnpay-jw76.onrender.com/register?ref={user.referral_code}",
         referrals=referred_users,
         total_invites=len(referrals),
         verified_users=sum(1 for r in referrals if r.verified),
