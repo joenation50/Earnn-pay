@@ -7,7 +7,6 @@ import json
 import uuid
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-import psycopg2
 from urllib.parse import urlparse
 
 app = Flask(__name__)
@@ -56,7 +55,7 @@ class User(db.Model):
     commission_balance = db.Column(db.Float, default=0)
     trust_score = db.Column(db.Integer, default=0)
     tier = db.Column(db.String(20), default='FREE')
-    daily_limit = db.Column(db.Integer, default=2)
+    daily_limit = db.Column(db.Integer, default=0)
     daily_tasks_completed = db.Column(db.Integer, default=0)
     streak_days = db.Column(db.Integer, default=0)
     last_checkin = db.Column(db.DateTime, nullable=True)
@@ -64,6 +63,7 @@ class User(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     is_banned = db.Column(db.Boolean, default=False)
     ban_reason = db.Column(db.Text, nullable=True)
+    email_verified = db.Column(db.Boolean, default=False)
     
     bank_name = db.Column(db.String(50), nullable=True)
     bank_account = db.Column(db.String(20), nullable=True)
@@ -210,6 +210,26 @@ class Announcement(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class UserActivity(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    action = db.Column(db.String(100), nullable=False)
+    details = db.Column(db.Text, nullable=True)
+    ip_address = db.Column(db.String(50), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class DailyBonus(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    bonus_amount = db.Column(db.Float, default=10)
+    claimed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class WithdrawalDay(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, unique=True, nullable=False)
+    is_withdrawal_day = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 # ==================== CONFIGURATION ====================
 ADMIN_USERNAME = 'admin'
 ADMIN_PASSWORD = 'admin123'
@@ -225,7 +245,7 @@ TIER_THRESHOLDS = {
 }
 
 TIER_TASKS = {
-    'FREE': 2,
+    'FREE': 0,
     'BEGINNER': 6,
     'EXPERT': 10,
     'LEGEND': 15
@@ -235,6 +255,13 @@ TIER_PRICES = {
     'BEGINNER': 1000,
     'EXPERT': 3500,
     'LEGEND': 10000
+}
+
+TIER_NAMES = {
+    'FREE': 'Free',
+    'BEGINNER': 'Beginner',
+    'EXPERT': 'Expert',
+    'LEGEND': 'Legend'
 }
 
 # ==================== GOOGLE TRUSTED REVIEWS ====================
@@ -322,6 +349,16 @@ def get_next_tier_info(current_tier, current_score):
             return next_tier, max(0, needed)
     return None, 0
 
+def log_activity(user_id, action, details=None, ip=None):
+    activity = UserActivity(
+        user_id=user_id,
+        action=action,
+        details=details,
+        ip_address=ip
+    )
+    db.session.add(activity)
+    db.session.commit()
+
 def create_tables():
     db.create_all()
     
@@ -340,6 +377,8 @@ def create_tables():
                  task_type='REVIEW', reward=50, tier_required='FREE'),
             Task(title='Ad Click', description='Visit a site and earn N40 instantly', 
                  task_type='ADS', reward=40, tier_required='FREE'),
+            Task(title='Share & Earn', description='Share our website on social media and earn N100', 
+                 task_type='SHARE', reward=100, tier_required='FREE'),
             Task(title='Google Review', description='Leave a genuine 5-star review on Google', 
                  task_type='REVIEW', reward=150, tier_required='BEGINNER'),
             Task(title='Ad Click', description='Visit a site and earn N40 instantly', 
@@ -375,44 +414,51 @@ def create_tables():
             db.session.add(task)
         db.session.commit()
 
-# ==================== STYLES ====================
+# ==================== PROFESSIONAL STYLES ====================
 STYLES = """
 :root {
-    --primary: #6C3CE1;
-    --primary-dark: #5A2FC7;
-    --primary-light: #8B5CF6;
-    --secondary: #F59E0B;
-    --success: #10B981;
-    --danger: #EF4444;
-    --bg: #F0F2F5;
-    --card-bg: #FFFFFF;
-    --text: #1F2937;
-    --text-light: #6B7280;
-    --border: #E5E7EB;
-    --shadow: 0 4px 20px rgba(0,0,0,0.08);
-    --shadow-hover: 0 8px 35px rgba(108, 60, 225, 0.15);
-    --radius: 20px;
-    --radius-sm: 12px;
-    --transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    --primary: #0a0a23;
+    --primary-light: #1a1a3e;
+    --primary-dark: #050512;
+    --secondary: #e94560;
+    --secondary-light: #ff6b81;
+    --gold: #d4af37;
+    --gold-light: #f5d76e;
+    --success: #27ae60;
+    --danger: #e74c3c;
+    --warning: #f39c12;
+    --info: #3498db;
+    --bg: #f0f2f5;
+    --card-bg: #ffffff;
+    --text: #1a1a2e;
+    --text-light: #4a4a5a;
+    --text-muted: #8a8a9a;
+    --border: #e8e8ed;
+    --shadow: 0 4px 30px rgba(0,0,0,0.06);
+    --shadow-hover: 0 8px 45px rgba(0,0,0,0.12);
+    --radius: 16px;
+    --radius-sm: 10px;
+    --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --nav-bg: rgba(255,255,255,0.95);
-    --hero-bg: linear-gradient(135deg, #6C3CE1, #8B5CF6);
+    --hero-bg: linear-gradient(135deg, #0a0a23, #1a1a3e);
 }
 
 [data-theme="dark"] {
-    --bg: #111827;
-    --card-bg: #1F2937;
-    --text: #F9FAFB;
-    --text-light: #9CA3AF;
-    --border: #374151;
-    --shadow: 0 4px 20px rgba(0,0,0,0.3);
-    --shadow-hover: 0 8px 35px rgba(108, 60, 225, 0.3);
-    --nav-bg: rgba(31, 41, 55, 0.95);
-    --hero-bg: linear-gradient(135deg, #4C1D95, #6C3CE1);
+    --bg: #0a0a23;
+    --card-bg: #1a1a3e;
+    --text: #ffffff;
+    --text-light: #d0d0e0;
+    --text-muted: #9090a0;
+    --border: #2a2a4e;
+    --shadow: 0 4px 30px rgba(0,0,0,0.3);
+    --shadow-hover: 0 8px 45px rgba(0,0,0,0.4);
+    --nav-bg: rgba(10, 10, 35, 0.95);
+    --hero-bg: linear-gradient(135deg, #050512, #0a0a23);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
     padding: 16px;
@@ -422,26 +468,27 @@ body {
     min-height: 100vh;
     overflow-x: hidden;
     transition: var(--transition);
+    -webkit-font-smoothing: antialiased;
 }
 
 .logo-container {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     text-decoration: none;
 }
 .logo-icon {
-    width: 42px;
-    height: 42px;
-    background: linear-gradient(135deg, #6C3CE1, #8B5CF6);
-    border-radius: 12px;
+    width: 48px;
+    height: 48px;
+    background: linear-gradient(135deg, var(--secondary), var(--gold));
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 22px;
     font-weight: 800;
     color: white;
-    box-shadow: 0 4px 15px rgba(108, 60, 225, 0.3);
+    box-shadow: 0 4px 20px rgba(233, 69, 96, 0.3);
     position: relative;
     overflow: hidden;
 }
@@ -452,73 +499,79 @@ body {
     right: -50%;
     width: 100%;
     height: 100%;
-    background: rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.08);
     border-radius: 50%;
 }
 .logo-icon span { position: relative; z-index: 1; }
 .logo-text { display: flex; flex-direction: column; line-height: 1.1; }
 .logo-text .main {
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 800;
-    background: linear-gradient(135deg, #6C3CE1, #8B5CF6);
+    color: var(--text);
+    letter-spacing: -0.5px;
+}
+.logo-text .main .highlight {
+    background: linear-gradient(135deg, var(--secondary), var(--gold));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    letter-spacing: -0.5px;
 }
 .logo-text .sub {
-    font-size: 8px;
+    font-size: 9px;
     font-weight: 600;
-    color: var(--text-light);
+    color: var(--text-muted);
     letter-spacing: 1.5px;
     text-transform: uppercase;
 }
-.logo-text .sub span { color: #6C3CE1; }
 
-.google-trust {
+.top-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 14px 18px;
+    background: var(--nav-bg);
+    backdrop-filter: blur(20px);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    animation: slideDown 0.5s ease;
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: var(--transition);
+}
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.user-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--secondary), var(--gold));
     display: flex;
     align-items: center;
-    gap: 12px;
-    background: var(--card-bg);
-    padding: 12px 16px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    margin-bottom: 16px;
+    justify-content: center;
+    color: white;
+    font-weight: 700;
+    font-size: 14px;
 }
-.google-trust .logo { font-size: 28px; font-weight: 700; color: #4285F4; }
-.google-trust .logo span { color: #EA4335; }
-.google-trust .stars { color: #F59E0B; font-size: 14px; }
-.google-trust .text { font-size: 12px; color: var(--text-light); }
-
-.google-review-card {
-    background: var(--card-bg);
-    border-radius: var(--radius-sm);
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    border: 1px solid var(--border);
-}
-.google-review-card .header { display: flex; justify-content: space-between; align-items: center; }
-.google-review-card .name { font-weight: 600; font-size: 14px; }
-.google-review-card .stars { color: #F59E0B; font-size: 13px; }
-.google-review-card .text { font-size: 13px; margin-top: 4px; color: var(--text); }
-.google-review-card .verified { font-size: 11px; color: var(--success); }
 
 .card {
     background: var(--card-bg);
-    backdrop-filter: blur(20px);
     border-radius: var(--radius);
     padding: 20px;
     margin-bottom: 16px;
     box-shadow: var(--shadow);
     transition: var(--transition);
-    border: 1px solid rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.05);
     animation: slideUp 0.6s ease forwards;
     opacity: 0;
     transform: translateY(30px);
 }
-.card:hover { box-shadow: var(--shadow-hover); transform: translateY(-3px); }
-.card:active { transform: scale(0.99); }
-
+.card:hover {
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-2px);
+}
 @keyframes slideUp {
     to { opacity: 1; transform: translateY(0); }
 }
@@ -532,12 +585,12 @@ body {
 .card h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
 
 .btn {
-    background: var(--primary);
+    background: var(--secondary);
     color: white;
     border: none;
     padding: 14px 24px;
     border-radius: var(--radius-sm);
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
     cursor: pointer;
     width: 100%;
@@ -556,47 +609,65 @@ body {
     width: 0;
     height: 0;
     border-radius: 50%;
-    background: rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.2);
     transform: translate(-50%, -50%);
     transition: width 0.6s, height 0.6s;
 }
 .btn:active::after { width: 400px; height: 400px; }
 .btn:active { transform: scale(0.97); }
-.btn-primary { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: white; box-shadow: 0 4px 15px rgba(108, 60, 225, 0.3); }
-.btn-secondary { background: var(--bg); color: var(--text); }
-.btn-success { background: linear-gradient(135deg, var(--success), #059669); color: white; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); }
-.btn-danger { background: linear-gradient(135deg, var(--danger), #DC2626); color: white; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3); }
-.btn-gold { background: linear-gradient(135deg, #F59E0B, #D97706); color: white; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3); }
-.btn-sm { padding: 8px 16px; font-size: 14px; width: auto; }
+.btn-primary { background: linear-gradient(135deg, var(--secondary), var(--gold)); color: white; box-shadow: 0 4px 20px rgba(233, 69, 96, 0.3); }
+.btn-secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+.btn-success { background: linear-gradient(135deg, var(--success), #1a7a3a); color: white; box-shadow: 0 4px 20px rgba(39, 174, 96, 0.3); }
+.btn-danger { background: linear-gradient(135deg, var(--danger), #c0392b); color: white; box-shadow: 0 4px 20px rgba(231, 76, 60, 0.3); }
+.btn-gold { background: linear-gradient(135deg, var(--gold), #b8942a); color: white; box-shadow: 0 4px 20px rgba(212, 175, 55, 0.3); }
+.btn-outline { background: transparent; color: var(--secondary); border: 2px solid var(--secondary); }
+.btn-outline:hover { background: var(--secondary); color: white; }
+.btn-sm { padding: 8px 16px; font-size: 13px; width: auto; }
 .btn-logout { 
-    background: linear-gradient(135deg, #EF4444, #DC2626); 
+    background: linear-gradient(135deg, #e74c3c, #c0392b); 
     color: white; 
-    padding: 10px 20px; 
-    font-size: 14px; 
-    font-weight: 700;
+    padding: 8px 16px; 
+    font-size: 13px; 
+    font-weight: 600;
     width: auto; 
     border-radius: 50px;
-    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
-    border: 2px solid rgba(255,255,255,0.2);
+    box-shadow: 0 4px 20px rgba(231, 76, 60, 0.3);
 }
-.btn-logout:hover { transform: scale(1.05); box-shadow: 0 6px 25px rgba(239, 68, 68, 0.5); }
-.btn-outline { background: transparent; color: var(--primary); border: 2px solid var(--primary); }
-.btn-outline:hover { background: var(--primary); color: white; }
-.btn-theme { 
-    background: var(--bg); 
-    color: var(--text); 
-    padding: 8px 12px; 
-    font-size: 18px; 
-    width: auto; 
-    border-radius: 50px; 
-    border: 1px solid var(--border);
-    transition: var(--transition);
+.btn-share {
+    background: linear-gradient(135deg, #1DA1F2, #0D8BD4);
+    color: white;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    width: auto;
+    border-radius: 50px;
 }
-.btn-theme:hover { border-color: var(--primary); }
-.btn-disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    pointer-events: none;
+.btn-whatsapp {
+    background: linear-gradient(135deg, #25D366, #128C7E);
+    color: white;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    width: auto;
+    border-radius: 50px;
+}
+.btn-facebook {
+    background: linear-gradient(135deg, #1877F2, #0D65D4);
+    color: white;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    width: auto;
+    border-radius: 50px;
+}
+.btn-telegram {
+    background: linear-gradient(135deg, #0088CC, #006699);
+    color: white;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    width: auto;
+    border-radius: 50px;
 }
 
 .tier-badge {
@@ -609,38 +680,19 @@ body {
     display: inline-block;
     transition: var(--transition);
 }
-.tier-free { background: #F3F4F6; color: #6B7280; }
-.tier-beginner { background: linear-gradient(135deg, #DBEAFE, #93C5FD); color: #1E40AF; }
-.tier-expert { background: linear-gradient(135deg, #FEF3C7, #FCD34D); color: #92400E; }
-.tier-legend { background: linear-gradient(135deg, #FCE4EC, #F9A8D4); color: #9B1C1C; }
-
-.top-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    padding: 12px 16px;
-    background: var(--nav-bg);
-    backdrop-filter: blur(20px);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    animation: slideDown 0.5s ease;
-    border: 1px solid rgba(255,255,255,0.1);
-    transition: var(--transition);
-}
-@keyframes slideDown {
-    from { opacity: 0; transform: translateY(-20px); }
-    to { opacity: 1; transform: translateY(0); }
-}
+.tier-free { background: #dfe6e9; color: #2d3436; }
+.tier-beginner { background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; }
+.tier-expert { background: linear-gradient(135deg, #fdcb6e, #f39c12); color: white; }
+.tier-legend { background: linear-gradient(135deg, #fd79a8, #e84393); color: white; }
 
 .top-header .user-actions { display: flex; align-items: center; gap: 8px; }
 .top-header .user-info { display: flex; align-items: center; gap: 8px; }
 
 .bottom-nav {
     display: flex;
-    gap: 3px;
+    gap: 2px;
     position: fixed;
-    bottom: 12px;
+    bottom: 16px;
     left: 50%;
     transform: translateX(-50%);
     background: var(--nav-bg);
@@ -658,32 +710,32 @@ body {
 .bottom-nav a {
     flex: 1;
     text-align: center;
-    padding: 6px 4px;
+    padding: 8px 4px;
     text-decoration: none;
-    color: var(--text-light);
+    color: var(--text-muted);
     font-size: 8px;
     font-weight: 600;
     border-radius: 50px;
     transition: var(--transition);
     position: relative;
 }
-.bottom-nav a .icon { font-size: 18px; display: block; margin-bottom: 1px; transition: var(--transition); }
+.bottom-nav a .icon { font-size: 20px; display: block; margin-bottom: 2px; transition: var(--transition); }
 .bottom-nav a .label { font-size: 8px; display: block; transition: var(--transition); }
-.bottom-nav a:hover { color: var(--primary); transform: translateY(-2px); }
+.bottom-nav a:hover { color: var(--secondary); transform: translateY(-2px); }
 .bottom-nav a.active {
     color: white;
-    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
-    box-shadow: 0 4px 20px rgba(108, 60, 225, 0.4);
-    padding: 6px 10px;
+    background: linear-gradient(135deg, var(--secondary), var(--gold));
+    box-shadow: 0 4px 20px rgba(233, 69, 96, 0.4);
+    padding: 8px 12px;
     flex: 1.2;
 }
-.bottom-nav a.active .icon { font-size: 20px; }
+.bottom-nav a.active .icon { font-size: 22px; }
 .bottom-nav a:active { transform: scale(0.9); }
 
 .hero-section {
     background: var(--hero-bg);
     border-radius: var(--radius);
-    padding: 30px 20px;
+    padding: 32px 24px;
     text-align: center;
     color: white;
     margin-bottom: 20px;
@@ -694,26 +746,26 @@ body {
 .hero-section::before {
     content: '';
     position: absolute;
-    top: -50%;
+    top: -60%;
     right: -30%;
-    width: 200px;
-    height: 200px;
-    background: rgba(255,255,255,0.08);
+    width: 300px;
+    height: 300px;
+    background: rgba(233, 69, 96, 0.1);
     border-radius: 50%;
 }
 .hero-section::after {
     content: '';
     position: absolute;
-    bottom: -40%;
+    bottom: -50%;
     left: -20%;
-    width: 150px;
-    height: 150px;
-    background: rgba(255,255,255,0.05);
+    width: 200px;
+    height: 200px;
+    background: rgba(212, 175, 55, 0.08);
     border-radius: 50%;
 }
-.hero-section .hero-icon { font-size: 60px; margin-bottom: 12px; position: relative; z-index: 1; }
-.hero-section h1 { font-size: 28px; font-weight: 800; margin-bottom: 8px; position: relative; z-index: 1; }
-.hero-section p { opacity: 0.9; font-size: 16px; position: relative; z-index: 1; }
+.hero-section .hero-icon { font-size: 56px; margin-bottom: 12px; position: relative; z-index: 1; }
+.hero-section h1 { font-size: 26px; font-weight: 800; margin-bottom: 8px; position: relative; z-index: 1; }
+.hero-section p { opacity: 0.9; font-size: 15px; position: relative; z-index: 1; line-height: 1.6; }
 
 .stats-counter {
     display: grid;
@@ -722,21 +774,22 @@ body {
     margin: 16px 0;
 }
 .stat-item {
-    background: rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.08);
     border-radius: var(--radius-sm);
     padding: 12px 8px;
     text-align: center;
     backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.05);
 }
-.stat-item .number { font-size: 22px; font-weight: 800; display: block; }
-.stat-item .label { font-size: 10px; opacity: 0.8; }
+.stat-item .number { font-size: 20px; font-weight: 800; display: block; }
+.stat-item .label { font-size: 9px; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.5px; }
 
 .review-card {
     background: var(--card-bg);
     border-radius: var(--radius-sm);
     padding: 14px 16px;
     margin-bottom: 10px;
-    border-left: 4px solid var(--primary);
+    border-left: 4px solid var(--secondary);
     transition: var(--transition);
     animation: slideUp 0.6s ease forwards;
     opacity: 0;
@@ -746,16 +799,16 @@ body {
 .review-card:hover { transform: translateX(5px); box-shadow: var(--shadow-hover); }
 .review-card .review-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .review-card .review-name { font-weight: 700; font-size: 14px; }
-.review-card .review-time { font-size: 11px; color: var(--text-light); }
-.review-card .review-text { font-size: 14px; color: var(--text); }
-.review-card .review-stars { color: #F59E0B; font-size: 14px; }
+.review-card .review-time { font-size: 11px; color: var(--text-muted); }
+.review-card .review-text { font-size: 14px; color: var(--text); line-height: 1.5; }
+.review-card .review-stars { color: var(--gold); font-size: 14px; }
 
 input, select, textarea {
     width: 100%;
     padding: 14px 16px;
     border: 2px solid var(--border);
     border-radius: var(--radius-sm);
-    font-size: 16px;
+    font-size: 15px;
     margin: 6px 0;
     transition: var(--transition);
     background: var(--bg);
@@ -763,8 +816,8 @@ input, select, textarea {
 }
 input:focus, select:focus, textarea:focus {
     outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 4px rgba(108, 60, 225, 0.1);
+    border-color: var(--secondary);
+    box-shadow: 0 0 0 4px rgba(233, 69, 96, 0.1);
     background: var(--card-bg);
 }
 textarea { min-height: 80px; resize: vertical; }
@@ -784,33 +837,25 @@ textarea { min-height: 80px; resize: vertical; }
     transition: var(--transition);
     border: 1px solid transparent;
 }
-.stat-box:hover { border-color: var(--primary); transform: translateY(-2px); }
+.stat-box:hover { border-color: var(--secondary); transform: translateY(-2px); }
 .stat-box:active { transform: scale(0.97); }
 .stat-box .value {
-    font-size: 26px;
+    font-size: 24px;
     font-weight: 800;
-    background: linear-gradient(135deg, var(--primary), var(--primary-light));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--secondary);
 }
-.stat-box .value.gold {
-    background: linear-gradient(135deg, #F59E0B, #D97706);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-.stat-box .label { font-size: 12px; color: var(--text-light); margin-top: 4px; font-weight: 500; }
+.stat-box .value.gold { color: var(--gold); }
+.stat-box .label { font-size: 12px; color: var(--text-muted); margin-top: 4px; font-weight: 500; }
 
 .progress-bar {
     background: var(--bg);
-    height: 10px;
+    height: 8px;
     border-radius: 50px;
     overflow: hidden;
     margin-top: 8px;
 }
 .progress-fill {
-    background: linear-gradient(90deg, var(--primary), var(--primary-light));
+    background: linear-gradient(90deg, var(--secondary), var(--gold));
     height: 100%;
     border-radius: 50px;
     transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
@@ -824,21 +869,21 @@ textarea { min-height: 80px; resize: vertical; }
     border-left: 4px solid;
     animation: slideDown 0.3s ease;
 }
-.alert-success { background: #ECFDF5; color: #065F46; border-color: var(--success); }
-.alert-error { background: #FEF2F2; color: #991B1B; border-color: var(--danger); }
-.alert-info { background: #EFF6FF; color: #1E40AF; border-color: var(--primary); }
+.alert-success { background: #d4edda; color: #155724; border-color: var(--success); }
+.alert-error { background: #f8d7da; color: #721c24; border-color: var(--danger); }
+.alert-info { background: #d1ecf1; color: #0c5460; border-color: var(--info); }
 
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .flex-center { display: flex; justify-content: center; align-items: center; }
-.text-muted { color: var(--text-light); font-size: 14px; }
+.text-muted { color: var(--text-muted); font-size: 14px; }
 .text-center { text-align: center; }
-.text-gold { color: var(--secondary); }
+.text-gold { color: var(--gold); }
 .mt-2 { margin-top: 12px; }
 .mb-2 { margin-bottom: 12px; }
 .mt-3 { margin-top: 20px; }
 
 .gradient-text {
-    background: linear-gradient(135deg, var(--primary), var(--primary-light));
+    background: linear-gradient(135deg, var(--secondary), var(--gold));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -857,14 +902,14 @@ textarea { min-height: 80px; resize: vertical; }
 .tier-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-hover); }
 .tier-card:active { transform: scale(0.98); }
 .tier-card.popular {
-    border-color: var(--primary);
-    background: linear-gradient(135deg, rgba(108, 60, 225, 0.1), rgba(139, 92, 246, 0.05));
+    border-color: var(--gold);
+    background: linear-gradient(135deg, rgba(212, 175, 55, 0.05), rgba(212, 175, 55, 0.02));
 }
-.tier-card .price { font-size: 28px; font-weight: 800; color: var(--primary); }
-.tier-card .price small { font-size: 14px; font-weight: 400; color: var(--text-light); }
+.tier-card .price { font-size: 28px; font-weight: 800; color: var(--secondary); }
+.tier-card .price small { font-size: 14px; font-weight: 400; color: var(--text-muted); }
 
 .badge-popular {
-    background: linear-gradient(135deg, #F59E0B, #D97706);
+    background: linear-gradient(135deg, var(--gold), #b8942a);
     color: white;
     padding: 2px 10px;
     border-radius: 50px;
@@ -884,9 +929,9 @@ textarea { min-height: 80px; resize: vertical; }
     border-radius: var(--radius-sm);
     padding: 16px;
     margin: 8px 0;
-    border: 2px dashed var(--primary);
+    border: 2px dashed var(--secondary);
 }
-.bank-details-box .label { font-size: 12px; color: var(--text-light); }
+.bank-details-box .label { font-size: 12px; color: var(--text-muted); }
 .bank-details-box .value { font-size: 18px; font-weight: 700; color: var(--text); }
 
 .status-badge {
@@ -895,10 +940,10 @@ textarea { min-height: 80px; resize: vertical; }
     font-size: 11px;
     font-weight: 600;
 }
-.status-pending { background: #FEF3C7; color: #92400E; }
-.status-verified { background: #D1FAE5; color: #065F46; }
-.status-rejected { background: #FEE2E2; color: #991B1B; }
-.status-completed { background: #DBEAFE; color: #1E40AF; }
+.status-pending { background: #fef3c7; color: #92400e; }
+.status-verified { background: #d1fae5; color: #065f46; }
+.status-rejected { background: #fee2e2; color: #991b1b; }
+.status-completed { background: #dbeafe; color: #1e40af; }
 
 .login-features {
     display: grid;
@@ -919,7 +964,7 @@ textarea { min-height: 80px; resize: vertical; }
 .login-feature .icon { font-size: 18px; }
 
 .bonus-badge {
-    background: linear-gradient(135deg, #F59E0B, #D97706);
+    background: linear-gradient(135deg, var(--gold), #b8942a);
     color: white;
     padding: 4px 12px;
     border-radius: 50px;
@@ -930,7 +975,7 @@ textarea { min-height: 80px; resize: vertical; }
 
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: linear-gradient(135deg, var(--primary), var(--primary-light)); border-radius: 50px; }
+::-webkit-scrollbar-thumb { background: var(--secondary); border-radius: 50px; }
 
 .gradient-border {
     position: relative;
@@ -945,7 +990,7 @@ textarea { min-height: 80px; resize: vertical; }
     right: -2px;
     bottom: -2px;
     border-radius: var(--radius);
-    background: linear-gradient(45deg, var(--primary), var(--secondary), var(--success), var(--primary));
+    background: linear-gradient(45deg, var(--secondary), var(--gold), var(--secondary));
     background-size: 400% 400%;
     z-index: -1;
     animation: gradientBorder 4s ease infinite;
@@ -963,7 +1008,7 @@ textarea { min-height: 80px; resize: vertical; }
     display: flex;
     justify-content: space-between;
     font-size: 13px;
-    color: var(--text-light);
+    color: var(--text-muted);
 }
 .profile-completion .bar {
     height: 6px;
@@ -974,32 +1019,32 @@ textarea { min-height: 80px; resize: vertical; }
 }
 .profile-completion .fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--success), var(--primary));
+    background: linear-gradient(90deg, var(--success), var(--secondary));
     border-radius: 50px;
     transition: width 0.8s ease;
 }
 
 .withdrawal-info {
-    background: linear-gradient(135deg, #FEF3C7, #FCD34D);
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
     padding: 12px 16px;
     border-radius: var(--radius-sm);
-    border-left: 4px solid var(--secondary);
+    border-left: 4px solid var(--gold);
 }
 .withdrawal-info .highlight {
     font-weight: 700;
-    color: var(--primary);
+    color: var(--secondary);
 }
 
 .upgrade-info {
-    background: linear-gradient(135deg, #FEF3C7, #FCD34D);
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
     padding: 12px 16px;
     border-radius: var(--radius-sm);
-    border-left: 4px solid var(--secondary);
+    border-left: 4px solid var(--gold);
     margin-bottom: 16px;
 }
 .upgrade-info .highlight {
     font-weight: 700;
-    color: var(--primary);
+    color: var(--secondary);
 }
 
 .trust-progress {
@@ -1009,19 +1054,81 @@ textarea { min-height: 80px; resize: vertical; }
     display: flex;
     justify-content: space-between;
     font-size: 11px;
-    color: var(--text-light);
+    color: var(--text-muted);
     margin-top: 2px;
 }
 .trust-progress .level .active {
-    color: var(--primary);
+    color: var(--secondary);
     font-weight: 700;
 }
 .trust-progress .level .completed {
     color: var(--success);
 }
+
+.google-trust {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--card-bg);
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    margin-bottom: 16px;
+}
+.google-trust .logo { font-size: 28px; font-weight: 700; color: #4285F4; }
+.google-trust .logo span { color: #EA4335; }
+.google-trust .stars { color: var(--gold); font-size: 14px; }
+.google-trust .text { font-size: 12px; color: var(--text-muted); }
+
+.google-review-card {
+    background: var(--card-bg);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+}
+.google-review-card .header { display: flex; justify-content: space-between; align-items: center; }
+.google-review-card .name { font-weight: 600; font-size: 14px; }
+.google-review-card .stars { color: var(--gold); font-size: 13px; }
+.google-review-card .text { font-size: 13px; margin-top: 4px; color: var(--text); }
+.google-review-card .verified { font-size: 11px; color: var(--success); }
+
+/* Share Task Specific Styles */
+.share-platforms {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 12px 0;
+}
+.share-platform {
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    text-align: center;
+    transition: var(--transition);
+    cursor: pointer;
+    border: 2px solid transparent;
+}
+.share-platform:hover {
+    border-color: var(--secondary);
+    transform: translateY(-2px);
+}
+.share-platform .platform-icon { font-size: 32px; display: block; margin-bottom: 4px; }
+.share-platform .platform-name { font-size: 12px; font-weight: 600; color: var(--text); }
+
+.share-confirm {
+    background: var(--card-bg);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    border: 2px solid var(--success);
+    text-align: center;
+}
+.share-confirm .icon { font-size: 48px; display: block; margin-bottom: 8px; }
 """
 
-# ==================== LANDING_PAGE - HOME ====================
+# ==================== PAGE DEFINITIONS ====================
+
+# LANDING_PAGE (Home)
 LANDING_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -1115,7 +1222,7 @@ LANDING_PAGE = """
                 {% endfor %}
             </div>
         </div>
-        <div class="card" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;text-align:center;border:none;">
+        <div class="card" style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;text-align:center;border:none;">
             <h2 style="color:white;">🎯 Ready to Start Earning?</h2>
             <p style="opacity:0.9;">Join thousands of users already earning!</p>
             <div style="margin-top:16px;display:flex;gap:8px;flex-direction:column;">
@@ -1180,9 +1287,9 @@ LOGIN_PAGE = """
                 <div class="login-feature"><span class="icon">⬆️</span> Upgrade Tiers</div>
                 <div class="login-feature"><span class="icon">🔒</span> Secure Platform</div>
             </div>
-            <p class="text-center mt-2">Don't have an account? <a href="/register" style="color:var(--primary);font-weight:600;">Register Now →</a></p>
+            <p class="text-center mt-2">Don't have an account? <a href="/register" style="color:var(--secondary);font-weight:600;">Register Now →</a></p>
         </div>
-        <div class="card" style="background:linear-gradient(135deg,#F3F4F6,white);text-align:center;">
+        <div class="card" style="background:linear-gradient(135deg,#f8f9fa,white);text-align:center;">
             <p class="text-muted" style="font-size:12px;">🔒 Your data is secure with us</p>
         </div>
     </div>
@@ -1244,11 +1351,11 @@ REGISTER_PAGE = """
                 </div>
                 <button type="submit" class="btn btn-primary">🎯 Create Account</button>
             </form>
-            <div style="margin-top:16px;background:linear-gradient(135deg,#FEF3C7,#FCD34D);padding:12px;border-radius:var(--radius-sm);text-align:center;">
+            <div style="margin-top:16px;background:linear-gradient(135deg,#fef3c7,#fde68a);padding:12px;border-radius:var(--radius-sm);text-align:center;">
                 <span style="font-weight:600;">🎉 Bonus:</span>
                 <span class="text-muted">Refer friends and earn <strong>₦500</strong> each!</span>
             </div>
-            <p class="text-center mt-2">Already have an account? <a href="/login" style="color:var(--primary);font-weight:600;">Login →</a></p>
+            <p class="text-center mt-2">Already have an account? <a href="/login" style="color:var(--secondary);font-weight:600;">Login →</a></p>
         </div>
     </div>
 </body>
@@ -1290,16 +1397,16 @@ DASHBOARD_PAGE = """
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        <div class="card" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;position:relative;overflow:hidden;border:none;">
-            <div style="position:absolute;top:-50px;right:-50px;width:150px;height:150px;background:rgba(255,255,255,0.1);border-radius:50%;"></div>
-            <div style="position:absolute;bottom:-30px;left:-30px;width:100px;height:100px;background:rgba(255,255,255,0.08);border-radius:50%;"></div>
+        <div class="card" style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;position:relative;overflow:hidden;border:none;">
+            <div style="position:absolute;top:-50px;right:-50px;width:150px;height:150px;background:rgba(233,69,96,0.1);border-radius:50%;"></div>
+            <div style="position:absolute;bottom:-30px;left:-30px;width:100px;height:100px;background:rgba(212,175,55,0.08);border-radius:50%;"></div>
             <div style="position:relative;z-index:1;">
                 <div style="font-size:14px;opacity:0.8;margin-bottom:4px;">💰 Available Balance</div>
                 <div style="font-size:40px;font-weight:800;">₦{{ "%.2f"|format(user.balance) }}</div>
                 <div style="display:flex;gap:12px;margin-top:16px;flex-wrap:wrap;">
-                    <span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:50px;font-size:12px;">⭐ Trust Score: {{ user.trust_score }}</span>
-                    <span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:50px;font-size:12px;">🔥 {{ user.streak_days }} day streak</span>
-                    <span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:50px;font-size:12px;">👥 {{ total_referrals }} referrals</span>
+                    <span style="background:rgba(255,255,255,0.1);padding:4px 12px;border-radius:50px;font-size:12px;">⭐ Trust Score: {{ user.trust_score }}</span>
+                    <span style="background:rgba(255,255,255,0.1);padding:4px 12px;border-radius:50px;font-size:12px;">🔥 {{ user.streak_days }} day streak</span>
+                    <span style="background:rgba(255,255,255,0.1);padding:4px 12px;border-radius:50px;font-size:12px;">👥 {{ total_referrals }} referrals</span>
                 </div>
             </div>
         </div>
@@ -1312,7 +1419,7 @@ DASHBOARD_PAGE = """
                         <span class="gradient-text">MAX LEVEL</span>
                     {% endif %}
                 </span>
-                <span style="font-weight:600;color:var(--primary);">{{ "%.0f"|format(progress) }}%</span>
+                <span style="font-weight:600;color:var(--secondary);">{{ "%.0f"|format(progress) }}%</span>
             </div>
             <div class="progress-bar"><div class="progress-fill" style="width:{{ progress }}%;"></div></div>
             <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap;">
@@ -1339,7 +1446,7 @@ DASHBOARD_PAGE = """
         <div class="card">
             <div class="flex-between">
                 <h3>⚡ Quick Actions</h3>
-                <span style="font-size:11px;color:var(--text-light);">🔄 Resets in {{ reset_time }}</span>
+                <span style="font-size:11px;color:var(--text-muted);">🔄 Resets in {{ reset_time }}</span>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
                 <a href="/earn" class="btn btn-primary" style="font-size:14px;padding:12px;">💰 Earn</a>
@@ -1349,7 +1456,7 @@ DASHBOARD_PAGE = """
             </div>
         </div>
         {% if announcements %}
-        <div class="card" style="background:linear-gradient(135deg,#FEF3C7,#FCD34D);border:2px solid var(--secondary);">
+        <div class="card" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--gold);">
             <h3>📢 Announcements</h3>
             {% for announcement in announcements %}
             <div style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.1);">
@@ -1406,44 +1513,87 @@ EARN_PAGE = """
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        <div class="card" style="background:linear-gradient(135deg,#F59E0B,#D97706);color:white;border:none;">
+        
+        {% if user.tier == 'FREE' and user.daily_limit == 0 %}
+        <div class="card" style="text-align:center;background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--gold);">
+            <div style="font-size:48px;">⬆️</div>
+            <h2 style="color:var(--text);">Upgrade Required</h2>
+            <p class="text-muted">You need to upgrade your tier to access tasks!</p>
+            <a href="/upgrade" class="btn btn-gold mt-2">Upgrade Now</a>
+        </div>
+        {% else %}
+        <div class="card" style="background:linear-gradient(135deg,#e94560,#ff6b81);color:white;border:none;">
             <div style="font-size:14px;opacity:0.9;">📊 Today's Earning Potential</div>
             <div style="font-size:32px;font-weight:800;">₦{{ remaining * 50 }}</div>
             <div style="font-size:12px;opacity:0.8;">{{ remaining }} tasks available</div>
         </div>
+        
+        <!-- Share Task Section -->
         {% for task in tasks %}
-        <div class="card" style="border-left:4px solid var(--primary);">
-            <div class="flex-between">
-                <div>
-                    <h3>{{ task.title }}</h3>
-                    <p class="text-muted">{{ task.description }}</p>
-                    <div style="margin-top:6px;">
-                        <span class="tier-badge tier-{{ task.tier_required|lower }}">{{ task.tier_required }}</span>
-                        <span style="margin-left:8px;font-size:12px;color:var(--text-light);">💵 ₦{{ task.reward }}</span>
+            {% if task.task_type == 'SHARE' %}
+            <div class="card" style="border-left:4px solid var(--gold);">
+                <div class="flex-between">
+                    <div>
+                        <h3>{{ task.title }}</h3>
+                        <p class="text-muted">{{ task.description }}</p>
+                        <div style="margin-top:6px;">
+                            <span class="tier-badge tier-{{ task.tier_required|lower }}">{{ task.tier_required }}</span>
+                            <span style="margin-left:8px;font-size:12px;color:var(--text-light);">💵 ₦{{ task.reward }}</span>
+                        </div>
+                    </div>
+                    <div>
+                        {% if task.id in completed_ids %}
+                            <span style="background:#27ae60;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">✅ Done</span>
+                        {% elif remaining <= 0 %}
+                            <span style="background:#e74c3c;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">⛔ Limit</span>
+                        {% else %}
+                            <a href="/share_task" class="btn btn-gold btn-sm" style="width:auto;padding:8px 16px;">📤 Share</a>
+                        {% endif %}
                     </div>
                 </div>
-                <div>
-                    {% if task.id in completed_ids %}
-                        <span style="background:#10B981;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">✅ Done</span>
-                    {% elif remaining <= 0 %}
-                        <span style="background:#EF4444;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">⛔ Limit</span>
-                    {% else %}
-                        <form method="POST" action="/complete_task/{{ task.id }}">
-                            <button type="submit" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;border:none;padding:10px 20px;border-radius:50px;font-size:14px;font-weight:600;cursor:pointer;">🚀 Start</button>
-                        </form>
-                    {% endif %}
+            </div>
+            {% endif %}
+        {% endfor %}
+        
+        <!-- Regular Tasks -->
+        {% for task in tasks %}
+            {% if task.task_type != 'SHARE' %}
+            <div class="card" style="border-left:4px solid var(--secondary);">
+                <div class="flex-between">
+                    <div>
+                        <h3>{{ task.title }}</h3>
+                        <p class="text-muted">{{ task.description }}</p>
+                        <div style="margin-top:6px;">
+                            <span class="tier-badge tier-{{ task.tier_required|lower }}">{{ task.tier_required }}</span>
+                            <span style="margin-left:8px;font-size:12px;color:var(--text-light);">💵 ₦{{ task.reward }}</span>
+                        </div>
+                    </div>
+                    <div>
+                        {% if task.id in completed_ids %}
+                            <span style="background:#27ae60;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">✅ Done</span>
+                        {% elif remaining <= 0 %}
+                            <span style="background:#e74c3c;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">⛔ Limit</span>
+                        {% else %}
+                            <form method="POST" action="/complete_task/{{ task.id }}">
+                                <button type="submit" style="background:linear-gradient(135deg,#e94560,#ff6b81);color:white;border:none;padding:10px 20px;border-radius:50px;font-size:14px;font-weight:600;cursor:pointer;">🚀 Start</button>
+                            </form>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
-        </div>
+            {% endif %}
         {% else %}
         <div class="card">
             <p class="text-center text-muted">🎯 No tasks available for your tier</p>
             <a href="/upgrade" class="btn btn-gold mt-2">⬆️ Upgrade to unlock more</a>
         </div>
         {% endfor %}
-        <div class="card" style="text-align:center;background:linear-gradient(135deg,#F3F4F6,white);">
+        
+        <div class="card" style="text-align:center;background:linear-gradient(135deg,#f8f9fa,white);">
             <p class="text-muted">💡 Complete tasks to earn rewards and increase your Trust Score</p>
         </div>
+        {% endif %}
+        
         <nav class="bottom-nav">
             <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
             <a href="/earn" class="active"><span class="icon">💰</span><span class="label">Earn</span></a>
@@ -1451,6 +1601,129 @@ EARN_PAGE = """
             <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
             <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
         </nav>
+    </div>
+</body>
+</html>
+"""
+
+# ==================== SHARE_TASK_PAGE ====================
+SHARE_TASK_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Share & Earn - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Share & Earn</span>
+                </div>
+            </div>
+            <div class="user-actions">
+                <div class="user-info">
+                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
+                </div>
+                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="card" style="text-align:center;">
+            <div style="font-size:48px;">📤</div>
+            <h2>Share & Earn</h2>
+            <p class="text-muted">Share our website on social media and earn ₦100!</p>
+        </div>
+        
+        <div class="card" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--gold);">
+            <div style="font-size:14px;color:var(--text-light);">Your Referral Link</div>
+            <div style="background:white;padding:12px;border-radius:var(--radius-sm);margin-top:8px;word-break:break-all;">
+                <code>{{ share_url }}</code>
+            </div>
+            <button onclick="navigator.clipboard.writeText('{{ share_url }}');alert('✅ Link copied!')" class="btn btn-secondary mt-2" style="width:auto;padding:10px 20px;">
+                📋 Copy Link
+            </button>
+        </div>
+        
+        <div class="card">
+            <h3>🌐 Share on Social Media</h3>
+            <p class="text-muted" style="font-size:13px;">Choose a platform to share and earn your reward</p>
+            <div class="share-platforms">
+                <a href="{{ whatsapp_link }}" target="_blank" class="share-platform" onclick="markShared('WhatsApp')">
+                    <span class="platform-icon">💬</span>
+                    <span class="platform-name">WhatsApp</span>
+                </a>
+                <a href="{{ facebook_link }}" target="_blank" class="share-platform" onclick="markShared('Facebook')">
+                    <span class="platform-icon">👍</span>
+                    <span class="platform-name">Facebook</span>
+                </a>
+                <a href="{{ twitter_link }}" target="_blank" class="share-platform" onclick="markShared('Twitter')">
+                    <span class="platform-icon">🐦</span>
+                    <span class="platform-name">Twitter</span>
+                </a>
+                <a href="{{ telegram_link }}" target="_blank" class="share-platform" onclick="markShared('Telegram')">
+                    <span class="platform-icon">✈️</span>
+                    <span class="platform-name">Telegram</span>
+                </a>
+            </div>
+        </div>
+        
+        <div class="card share-confirm">
+            <span class="icon">✅</span>
+            <h3>After sharing, confirm here</h3>
+            <p class="text-muted" style="font-size:13px;">Click the button below after you've shared on any platform</p>
+            <form method="POST" action="/share_task">
+                <input type="hidden" name="platform" id="platformInput" value="social">
+                <button type="submit" class="btn btn-success mt-2">💰 Claim ₦100 Reward</button>
+            </form>
+        </div>
+        
+        <div class="card" style="text-align:center;background:linear-gradient(135deg,#f8f9fa,white);">
+            <p class="text-muted">💡 Share on multiple platforms for more visibility!</p>
+        </div>
+        
+        <nav class="bottom-nav">
+            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/earn" class="active"><span class="icon">💰</span><span class="label">Earn</span></a>
+            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
+            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
+            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
+        </nav>
+        
+        <script>
+            function markShared(platform) {
+                document.getElementById('platformInput').value = platform;
+                // Show a message that they've shared
+                setTimeout(function() {
+                    document.querySelector('.share-confirm').style.borderColor = '#27ae60';
+                    document.querySelector('.share-confirm .icon').textContent = '🎉';
+                }, 500);
+            }
+            
+            // Auto-detect if user is coming back from sharing
+            window.addEventListener('focus', function() {
+                // Check if user was on a social media site
+                if (document.referrer.includes('facebook') || 
+                    document.referrer.includes('twitter') || 
+                    document.referrer.includes('whatsapp') || 
+                    document.referrer.includes('telegram')) {
+                    document.getElementById('platformInput').value = 'social';
+                }
+            });
+        </script>
     </div>
 </body>
 </html>
@@ -1491,7 +1764,7 @@ REFERRAL_PAGE = """
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        <div class="card" style="background:linear-gradient(135deg,#10B981,#059669);color:white;text-align:center;border:none;">
+        <div class="card" style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;text-align:center;border:none;">
             <div style="font-size:48px;">👥</div>
             <h2>Invite & Earn</h2>
             <p style="opacity:0.9;">Earn <strong>₦500</strong> for every friend who joins!</p>
@@ -1504,10 +1777,10 @@ REFERRAL_PAGE = """
                 <label>📋 Your Referral Link</label>
                 <div style="display:flex;gap:8px;align-items:center;">
                     <input type="text" value="{{ referral_link }}" readonly style="flex:1;" onclick="this.select();navigator.clipboard.writeText(this.value);">
-                    <button onclick="navigator.clipboard.writeText('{{ referral_link }}');alert('✅ Link copied!')" style="background:var(--primary);color:white;border:none;padding:12px 16px;border-radius:12px;cursor:pointer;font-size:20px;">📋</button>
+                    <button onclick="navigator.clipboard.writeText('{{ referral_link }}');alert('✅ Link copied!')" style="background:var(--secondary);color:white;border:none;padding:12px 16px;border-radius:12px;cursor:pointer;font-size:20px;">📋</button>
                 </div>
             </div>
-            <div style="background:linear-gradient(135deg,#FEF3C7,#FCD34D);padding:12px;border-radius:var(--radius-sm);text-align:center;">
+            <div style="background:linear-gradient(135deg,#fef3c7,#fde68a);padding:12px;border-radius:var(--radius-sm);text-align:center;">
                 <span style="font-weight:600;">💡 Share your link on social media or with friends!</span>
             </div>
         </div>
@@ -1531,7 +1804,7 @@ REFERRAL_PAGE = """
             <div style="padding:8px 0;border-bottom:1px solid var(--border);">
                 <div class="flex-between">
                     <div><strong>{{ ref.username }}</strong><span class="tier-badge tier-{{ ref.tier|lower }}" style="font-size:10px;margin-left:8px;">{{ ref.tier }}</span></div>
-                    <div style="text-align:right;"><span style="font-size:12px;color:var(--text-light);">⭐ {{ ref.trust_score }} pts</span><div style="font-size:11px;color:#10B981;">+₦500 bonus</div></div>
+                    <div style="text-align:right;"><span style="font-size:12px;color:var(--text-light);">⭐ {{ ref.trust_score }} pts</span><div style="font-size:11px;color:#27ae60;">+₦500 bonus</div></div>
                 </div>
             </div>
             {% endfor %}
@@ -1601,19 +1874,19 @@ UPGRADE_PAGE = """
             <h2 style="font-size:24px;">🚀 Upgrade Your Tier</h2>
             <p class="text-muted">Pay to unlock higher paying tasks!</p>
         </div>
-        <div class="card" style="text-align:center;background:linear-gradient(135deg,#F3F4F6,white);">
+        <div class="card" style="text-align:center;background:linear-gradient(135deg,#f8f9fa,white);">
             <div style="font-size:14px;color:var(--text-light);">📌 Current Tier</div>
             <div style="font-size:32px;font-weight:800;" class="gradient-text">{{ user.tier }}</div>
             <div style="font-size:14px;color:var(--text-light);">📝 {{ user.daily_limit }} tasks/day</div>
         </div>
         
         {% set payment_settings = get_payment_settings() %}
-        <div class="card" style="background:linear-gradient(135deg,#EDE9FE,white);border:2px solid var(--primary);">
-            <h3 style="color:var(--primary);">🏦 Send Payment To:</h3>
+        <div class="card" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--gold);">
+            <h3 style="color:var(--text);">🏦 Send Payment To:</h3>
             <div class="bank-details-box">
                 <div><span class="label">🏛️ Bank:</span> <span class="value">{{ payment_settings.bank_name }}</span></div>
                 <div><span class="label">👤 Account Name:</span> <span class="value">{{ payment_settings.account_name }}</span></div>
-                <div><span class="label">🔢 Account Number:</span> <span class="value" style="color:var(--primary);font-size:20px;">{{ payment_settings.account_number }}</span></div>
+                <div><span class="label">🔢 Account Number:</span> <span class="value" style="color:var(--secondary);font-size:20px;">{{ payment_settings.account_number }}</span></div>
             </div>
             <p class="text-muted" style="font-size:12px;text-align:center;">⚠️ Send the exact amount for your chosen tier</p>
         </div>
@@ -1670,7 +1943,7 @@ UPGRADE_PAGE = """
         </div>
         {% endif %}
         
-        <div class="card" style="background:linear-gradient(135deg,#F3F4F6,white);">
+        <div class="card" style="background:linear-gradient(135deg,#f8f9fa,white);">
             <h3>💡 How It Works</h3>
             <ol style="margin-top:8px;padding-left:20px;">
                 <li style="padding:4px 0;">💰 Send payment to the bank details above</li>
@@ -1736,7 +2009,7 @@ WITHDRAW_PAGE = """
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        <div class="card" style="text-align:center;background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;border:none;">
+        <div class="card" style="text-align:center;background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;border:none;">
             <div style="font-size:14px;opacity:0.8;">💰 Available Balance</div>
             <div style="font-size:40px;font-weight:800;">₦{{ "%.2f"|format(user.balance) }}</div>
         </div>
@@ -1901,8 +2174,8 @@ ACCOUNT_PAGE = """
         <div class="card">
             <h3>🎨 Theme Preference</h3>
             <div style="display:flex;gap:12px;margin-top:8px;">
-                <form method="POST" action="/set_theme" style="flex:1;"><input type="hidden" name="theme" value="light"><button type="submit" class="btn btn-secondary" style="{% if user.theme == 'light' %}border:2px solid var(--primary);{% endif %}">☀️ Light</button></form>
-                <form method="POST" action="/set_theme" style="flex:1;"><input type="hidden" name="theme" value="dark"><button type="submit" class="btn btn-secondary" style="{% if user.theme == 'dark' %}border:2px solid var(--primary);{% endif %}">🌙 Dark</button></form>
+                <form method="POST" action="/set_theme" style="flex:1;"><input type="hidden" name="theme" value="light"><button type="submit" class="btn btn-secondary" style="{% if user.theme == 'light' %}border:2px solid var(--secondary);{% endif %}">☀️ Light</button></form>
+                <form method="POST" action="/set_theme" style="flex:1;"><input type="hidden" name="theme" value="dark"><button type="submit" class="btn btn-secondary" style="{% if user.theme == 'dark' %}border:2px solid var(--secondary);{% endif %}">🌙 Dark</button></form>
             </div>
         </div>
         <div class="card" style="border:2px solid var(--danger);"><h3 style="color:var(--danger);">🔒 Security</h3><a href="/change_password" class="btn btn-danger">🔑 Change Password</a></div>
@@ -2005,7 +2278,7 @@ SUPPORT_PAGE = """
                 <button type="submit" class="btn btn-primary">🚀 Submit Ticket</button>
             </form>
         </div>
-        <div class="card" style="background:linear-gradient(135deg,#FEF3C7,#FCD34D);border:2px solid var(--secondary);">
+        <div class="card" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--gold);">
             <h3>💡 Quick Help</h3>
             <div style="margin-top:8px;"><div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.1);"><span style="font-size:20px;">📖</span><div><strong>Check FAQ</strong><br><span class="text-muted">Common questions answered</span></div></div>
             <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.1);"><span style="font-size:20px;">📧</span><div><strong>Email Us</strong><br><span class="text-muted">support@earnnpay.com</span></div></div>
@@ -2109,10 +2382,10 @@ ADMIN_DASHBOARD_PAGE = """
             {% endif %}
         {% endwith %}
         <div class="stats-grid" style="margin-bottom:16px;">
-            <div class="stat-box" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;"><div class="value" style="color:white;font-size:32px;">{{ total_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">👥 Total Users</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#F59E0B,#D97706);color:white;"><div class="value" style="color:white;font-size:32px;">{{ pending_count }}</div><div class="label" style="color:rgba(255,255,255,0.8);">⏳ Pending</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#10B981,#059669);color:white;"><div class="value" style="color:white;font-size:32px;">{{ verified_count }}</div><div class="label" style="color:rgba(255,255,255,0.8);">✅ Verified</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#EF4444,#DC2626);color:white;"><div class="value" style="color:white;font-size:32px;">{{ open_tickets }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💬 Tickets</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;"><div class="value" style="color:white;font-size:32px;">{{ total_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">👥 Total Users</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#e94560,#ff6b81);color:white;"><div class="value" style="color:white;font-size:32px;">{{ pending_count }}</div><div class="label" style="color:rgba(255,255,255,0.8);">⏳ Pending</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#27ae60,#1a7a3a);color:white;"><div class="value" style="color:white;font-size:32px;">{{ verified_count }}</div><div class="label" style="color:rgba(255,255,255,0.8);">✅ Verified</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#f39c12,#e67e22);color:white;"><div class="value" style="color:white;font-size:32px;">{{ open_tickets }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💬 Tickets</div></div>
         </div>
         <div class="card">
             <h3>📊 Payment Requests</h3>
@@ -2139,7 +2412,7 @@ ADMIN_DASHBOARD_PAGE = """
             {% for user in all_users %}
             <div style="padding:8px 0;border-bottom:1px solid var(--border);">
                 <div class="flex-between">
-                    <div><strong>{{ user.username }}</strong><span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span><span style="font-size:10px;color:#10B981;margin-left:4px;">+₦{{ "%.0f"|format(user.referral_bonus_earned) }}</span></div>
+                    <div><strong>{{ user.username }}</strong><span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span><span style="font-size:10px;color:#27ae60;margin-left:4px;">+₦{{ "%.0f"|format(user.referral_bonus_earned) }}</span></div>
                     <div style="text-align:right;"><div style="font-size:12px;">💰 ₦{{ "%.2f"|format(user.balance) }}</div><div style="font-size:12px;color:var(--text-light);">⭐ {{ user.trust_score }} pts</div></div>
                 </div>
             </div>
@@ -2150,7 +2423,7 @@ ADMIN_DASHBOARD_PAGE = """
             <a href="/admin/users" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">📊</span><span class="label">Users</span></a>
             <a href="/admin/support" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">💬</span><span class="label">Support</span></a>
             <a href="/admin/settings" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">⚙️</span><span class="label">Settings</span></a>
-            <a href="/admin/dashboard" class="active" style="flex:1.2;text-align:center;padding:6px 10px;text-decoration:none;color:white;font-size:8px;background:linear-gradient(135deg,#6C3CE1,#8B5CF6);border-radius:50px;box-shadow:0 4px 20px rgba(108,60,225,0.4);"><span class="icon">🔐</span><span class="label">Admin</span></a>
+            <a href="/admin/dashboard" class="active" style="flex:1.2;text-align:center;padding:6px 10px;text-decoration:none;color:white;font-size:8px;background:linear-gradient(135deg,#e94560,#ff6b81);border-radius:50px;box-shadow:0 4px 20px rgba(233,69,96,0.4);"><span class="icon">🔐</span><span class="label">Admin</span></a>
         </nav>
     </div>
 </body>
@@ -2180,15 +2453,15 @@ ADMIN_USERS_PAGE = """
             <div><a href="/admin/dashboard" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a><a href="/admin/logout" class="btn btn-sm btn-danger" style="width:auto;padding:8px 16px;">🚪</a></div>
         </div>
         <div class="stats-grid" style="margin-bottom:16px;">
-            <div class="stat-box" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;"><div class="value" style="color:white;font-size:32px;">{{ total_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">👥 Total</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#F59E0B,#D97706);color:white;"><div class="value" style="color:white;font-size:32px;">{{ free_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">🆓 Free</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#10B981,#059669);color:white;"><div class="value" style="color:white;font-size:32px;">{{ paid_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💎 Paid</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#EF4444,#DC2626);color:white;"><div class="value" style="color:white;font-size:32px;">₦{{ total_balance }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💰 Balance</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;"><div class="value" style="color:white;font-size:32px;">{{ total_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">👥 Total</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#e94560,#ff6b81);color:white;"><div class="value" style="color:white;font-size:32px;">{{ free_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">🆓 Free</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#27ae60,#1a7a3a);color:white;"><div class="value" style="color:white;font-size:32px;">{{ paid_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💎 Paid</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#f39c12,#e67e22);color:white;"><div class="value" style="color:white;font-size:32px;">₦{{ total_balance }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💰 Balance</div></div>
         </div>
         <div class="card" style="overflow-x:auto;">
             <h3>📊 Registered Users</h3>
             <table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;">
-                <thead><tr style="background:var(--primary);color:white;"><th style="padding:10px;text-align:left;">ID</th><th style="padding:10px;text-align:left;">Username</th><th style="padding:10px;text-align:left;">Email</th><th style="padding:10px;text-align:left;">Tier</th><th style="padding:10px;text-align:left;">Balance</th><th style="padding:10px;text-align:left;">Trust</th><th style="padding:10px;text-align:left;">Refs</th><th style="padding:10px;text-align:left;">Joined</th><th style="padding:10px;text-align:left;">Actions</th></tr></thead>
+                <thead><tr style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;"><th style="padding:10px;text-align:left;">ID</th><th style="padding:10px;text-align:left;">Username</th><th style="padding:10px;text-align:left;">Email</th><th style="padding:10px;text-align:left;">Tier</th><th style="padding:10px;text-align:left;">Balance</th><th style="padding:10px;text-align:left;">Trust</th><th style="padding:10px;text-align:left;">Refs</th><th style="padding:10px;text-align:left;">Joined</th><th style="padding:10px;text-align:left;">Actions</th></tr></thead>
                 <tbody>
                     {% for user in users %}
                     <tr style="border-bottom:1px solid var(--border);">
@@ -2281,7 +2554,7 @@ ADMIN_SETTINGS_PAGE = """
             <div class="bank-details-box">
                 <div><span class="label">🏛️ Bank:</span> <span class="value">{{ settings.bank_name }}</span></div>
                 <div><span class="label">👤 Account Name:</span> <span class="value">{{ settings.account_name }}</span></div>
-                <div><span class="label">🔢 Account Number:</span> <span class="value" style="color:var(--primary);">{{ settings.account_number }}</span></div>
+                <div><span class="label">🔢 Account Number:</span> <span class="value" style="color:var(--secondary);">{{ settings.account_number }}</span></div>
             </div>
             <p class="text-muted" style="font-size:12px;text-align:center;">Last updated: {{ settings.updated_at.strftime('%b %d, %Y %H:%M') if settings.updated_at else 'N/A' }}</p>
         </div>
@@ -2313,10 +2586,10 @@ ADMIN_SUPPORT_PAGE = """
             <div><a href="/admin/dashboard" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a><a href="/admin/logout" class="btn btn-sm btn-danger" style="width:auto;padding:8px 16px;">🚪</a></div>
         </div>
         <div class="stats-grid" style="margin-bottom:16px;">
-            <div class="stat-box" style="background:linear-gradient(135deg,#6C3CE1,#8B5CF6);color:white;"><div class="value" style="color:white;font-size:32px;">{{ tickets|length }}</div><div class="label" style="color:rgba(255,255,255,0.8);">📊 Total</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#F59E0B,#D97706);color:white;"><div class="value" style="color:white;font-size:32px;">{{ tickets|selectattr('status', 'equalto', 'OPEN')|list|length }}</div><div class="label" style="color:rgba(255,255,255,0.8);">🟡 Open</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#10B981,#059669);color:white;"><div class="value" style="color:white;font-size:32px;">{{ tickets|selectattr('status', 'equalto', 'RESOLVED')|list|length }}</div><div class="label" style="color:rgba(255,255,255,0.8);">✅ Resolved</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#EF4444,#DC2626);color:white;"><div class="value" style="color:white;font-size:32px;">{{ tickets|selectattr('priority', 'equalto', 'CRITICAL')|list|length }}</div><div class="label" style="color:rgba(255,255,255,0.8);">🔴 Critical</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;"><div class="value" style="color:white;font-size:32px;">{{ tickets|length }}</div><div class="label" style="color:rgba(255,255,255,0.8);">📊 Total</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#e94560,#ff6b81);color:white;"><div class="value" style="color:white;font-size:32px;">{{ tickets|selectattr('status', 'equalto', 'OPEN')|list|length }}</div><div class="label" style="color:rgba(255,255,255,0.8);">🟡 Open</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#27ae60,#1a7a3a);color:white;"><div class="value" style="color:white;font-size:32px;">{{ tickets|selectattr('status', 'equalto', 'RESOLVED')|list|length }}</div><div class="label" style="color:rgba(255,255,255,0.8);">✅ Resolved</div></div>
+            <div class="stat-box" style="background:linear-gradient(135deg,#f39c12,#e67e22);color:white;"><div class="value" style="color:white;font-size:32px;">{{ tickets|selectattr('priority', 'equalto', 'CRITICAL')|list|length }}</div><div class="label" style="color:rgba(255,255,255,0.8);">🔴 Critical</div></div>
         </div>
         <div class="card">
             <h3>📋 All Tickets</h3>
@@ -2387,6 +2660,7 @@ def register():
         user = User(username=username, email=email)
         user.set_password(password)
         user.referral_code = user.generate_referral_code()
+        user.daily_limit = 0  # No tasks for free tier
         
         ref_code = request.args.get('ref', '')
         if ref_code:
@@ -2420,10 +2694,15 @@ def login():
         
         user = User.query.filter_by(username=username).first()
         if user and user.check_password(password):
+            if user.is_banned:
+                flash(f'❌ Your account has been banned. Reason: {user.ban_reason or "Violation of terms"}', 'error')
+                return redirect('/login')
+            
             session['username'] = username
             session['user_id'] = user.id
             user.last_login = datetime.utcnow()
             db.session.commit()
+            log_activity(user.id, 'login', f'User logged in from {request.remote_addr}')
             flash('👋 Welcome back!', 'success')
             return redirect('/dashboard')
         
@@ -2433,6 +2712,8 @@ def login():
 
 @app.route('/logout')
 def logout():
+    if 'user_id' in session:
+        log_activity(session['user_id'], 'logout', 'User logged out')
     session.clear()
     flash('👋 Logged out successfully', 'success')
     return redirect('/login')
@@ -2449,8 +2730,13 @@ def dashboard():
     
     if user.is_banned:
         session.clear()
-        flash('❌ Your account has been banned.', 'error')
+        flash(f'❌ Your account has been banned. Reason: {user.ban_reason or "Violation of terms"}', 'error')
         return redirect('/login')
+    
+    # Check if user has upgraded (tier is not FREE or has tasks)
+    if user.tier == 'FREE' and user.daily_limit == 0:
+        flash('⚠️ You need to upgrade your tier to access all features!', 'info')
+        return render_template_string(UPGRADE_REQUIRED_PAGE, user=user)
     
     now = datetime.now()
     if user.last_task_reset:
@@ -2516,6 +2802,151 @@ def dashboard():
         announcements=announcements
     )
 
+@app.route('/share_task', methods=['GET', 'POST'])
+def share_task():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    if user.is_banned:
+        session.clear()
+        flash('❌ Your account has been banned.', 'error')
+        return redirect('/login')
+    
+    if request.method == 'POST':
+        platform = request.form.get('platform', 'social')
+        bonus = 100
+        
+        # Check if user already completed share task today
+        today = datetime.now().date()
+        share_task_obj = Task.query.filter_by(task_type='SHARE', is_active=True).first()
+        if share_task_obj:
+            already_completed = TaskCompletion.query.filter(
+                TaskCompletion.user_id == user.id,
+                TaskCompletion.task_id == share_task_obj.id,
+                db.func.date(TaskCompletion.completed_at) == today
+            ).first()
+            
+            if already_completed:
+                flash('⚠️ You already completed the share task today!', 'error')
+                return redirect('/earn')
+        
+        user.balance += bonus
+        user.trust_score += 1
+        
+        # Create task completion record
+        share_task = Task.query.filter_by(task_type='SHARE', is_active=True).first()
+        if share_task:
+            completion = TaskCompletion(
+                user_id=user.id,
+                task_id=share_task.id,
+                proof_text=f'Shared on {platform}'
+            )
+            db.session.add(completion)
+        
+        db.session.commit()
+        log_activity(user.id, 'share_task', f'Shared on {platform}')
+        flash(f'✅ Thank you for sharing! +₦{bonus}', 'success')
+        return redirect('/earn')
+    
+    share_url = f"http://127.0.0.1:5000/register?ref={user.referral_code}"
+    share_text = f"Join Earn'n'Pay Labs and start earning real cash! Use my referral link: {share_url}"
+    
+    return render_template_string(SHARE_TASK_PAGE,
+        user=user,
+        share_url=share_url,
+        share_text=share_text,
+        whatsapp_link=f"https://wa.me/?text={share_text}",
+        facebook_link=f"https://www.facebook.com/sharer/sharer.php?u={share_url}",
+        twitter_link=f"https://twitter.com/intent/tweet?text={share_text}",
+        telegram_link=f"https://t.me/share/url?url={share_url}&text={share_text}"
+    )
+
+# ==================== UPGRADE_REQUIRED_PAGE ====================
+UPGRADE_REQUIRED_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upgrade Required - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Upgrade Required</span>
+                </div>
+            </div>
+            <div class="user-actions">
+                <div class="user-info">
+                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
+                </div>
+                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="card" style="text-align:center;background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--gold);padding:30px 20px;">
+            <div style="font-size:64px;">⬆️</div>
+            <h2 style="color:var(--text);font-size:24px;">Upgrade Required</h2>
+            <p class="text-muted" style="font-size:16px;margin:12px 0;">You need to upgrade your tier to access all features and start earning!</p>
+            <div style="background:white;padding:16px;border-radius:var(--radius-sm);margin:16px 0;">
+                <div style="font-size:14px;color:var(--text-light);">Current Tier</div>
+                <div style="font-size:28px;font-weight:800;color:var(--text);">{{ user.tier }}</div>
+                <div style="font-size:14px;color:var(--text-light);">📝 {{ user.daily_limit }} tasks/day</div>
+            </div>
+            <a href="/upgrade" class="btn btn-gold" style="font-size:18px;padding:16px;">🚀 Upgrade Now</a>
+            <p style="font-size:12px;color:var(--text-muted);margin-top:12px;">💡 Upgrade to unlock higher paying tasks and earn more!</p>
+        </div>
+        
+        <div class="card" style="background:linear-gradient(135deg,#f8f9fa,white);">
+            <h3>🎯 Benefits of Upgrading</h3>
+            <div style="margin-top:8px;">
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);">
+                    <span style="font-size:20px;">💰</span>
+                    <div><strong>Higher Earnings</strong><br><span class="text-muted">Earn up to ₦1,000 per task</span></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);">
+                    <span style="font-size:20px;">📝</span>
+                    <div><strong>More Tasks</strong><br><span class="text-muted">Access 15+ tasks daily</span></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
+                    <span style="font-size:20px;">⭐</span>
+                    <div><strong>Premium Features</strong><br><span class="text-muted">Exclusive tasks and higher rewards</span></div>
+                </div>
+            </div>
+        </div>
+        
+        <nav class="bottom-nav">
+            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
+            <a href="/upgrade" class="active"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
+            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
+            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
+        </nav>
+    </div>
+</body>
+</html>
+"""
+
+# ==================== REST OF ROUTES ====================
+
 @app.route('/account')
 def account_page():
     if 'username' not in session:
@@ -2564,6 +2995,7 @@ def update_account():
         user.date_of_birth = datetime.strptime(dob, '%Y-%m-%d').date()
     
     db.session.commit()
+    log_activity(user.id, 'update_account', 'Updated account information')
     flash('✅ Account information updated successfully!', 'success')
     return redirect('/account')
 
@@ -2582,6 +3014,7 @@ def update_bank():
     user.account_name = request.form.get('account_name')
     
     db.session.commit()
+    log_activity(user.id, 'update_bank', 'Updated bank details')
     flash('✅ Bank details updated successfully!', 'success')
     return redirect('/account')
 
@@ -2629,12 +3062,13 @@ def change_password():
             flash('❌ New passwords do not match!', 'error')
             return redirect('/change_password')
         
-        if len(new) < 6:
-            flash('❌ Password must be at least 6 characters!', 'error')
+        if len(new) < 8:
+            flash('❌ Password must be at least 8 characters!', 'error')
             return redirect('/change_password')
         
         user.set_password(new)
         db.session.commit()
+        log_activity(user.id, 'change_password', 'Changed password')
         flash('✅ Password changed successfully!', 'success')
         return redirect('/account')
     
@@ -2690,6 +3124,7 @@ def submit_support():
     db.session.add(ticket)
     db.session.commit()
     
+    log_activity(user.id, 'submit_ticket', f'Submitted support ticket: {subject}')
     flash('✅ Your support ticket has been submitted!', 'success')
     return redirect('/support')
 
@@ -2707,6 +3142,11 @@ def earn():
         session.clear()
         flash('❌ Your account has been banned.', 'error')
         return redirect('/login')
+    
+    # Check if user has upgraded
+    if user.tier == 'FREE' and user.daily_limit == 0:
+        flash('⚠️ You need to upgrade your tier to access tasks!', 'error')
+        return redirect('/upgrade')
     
     now = datetime.now()
     if user.last_task_reset:
@@ -2751,6 +3191,11 @@ def complete_task(task_id):
         flash('❌ Your account has been banned.', 'error')
         return redirect('/login')
     
+    # Check if user has upgraded
+    if user.tier == 'FREE' and user.daily_limit == 0:
+        flash('⚠️ You need to upgrade your tier to access tasks!', 'error')
+        return redirect('/upgrade')
+    
     now = datetime.now()
     if user.last_task_reset:
         if now - user.last_task_reset >= timedelta(hours=24):
@@ -2783,12 +3228,13 @@ def complete_task(task_id):
     new_tier = get_tier_from_score(user.trust_score)
     if new_tier != user.tier:
         user.tier = new_tier
-        user.daily_limit = TIER_TASKS.get(new_tier, 2)
+        user.daily_limit = TIER_TASKS.get(new_tier, 0)
         flash(f'🎉 Congratulations! You\'ve been upgraded to {new_tier.title()} tier!', 'success')
     
     user.daily_tasks_completed += 1
     db.session.commit()
     
+    log_activity(user.id, 'complete_task', f'Completed task: {task.title}')
     flash(f'✅ Task completed! +₦{task.reward}', 'success')
     return redirect('/earn')
 
@@ -2887,11 +3333,13 @@ def submit_payment():
         sender_name=sender_name,
         payment_date=datetime.strptime(payment_date, '%Y-%m-%dT%H:%M'),
         notes=notes,
-        status='PENDING'
+        status='PENDING',
+        type='UPGRADE'
     )
     db.session.add(tx)
     db.session.commit()
     
+    log_activity(user.id, 'submit_payment', f'Submitted payment for {tier} tier')
     flash('✅ Payment proof submitted! Please wait for admin verification.', 'success')
     return redirect('/upgrade')
 
@@ -2947,6 +3395,7 @@ def withdraw_page():
         user.balance -= amount
         db.session.commit()
         
+        log_activity(user.id, 'withdraw_request', f'Requested withdrawal of ₦{amount}')
         flash(f'💸 Withdrawal of ₦{amount:,.2f} requested!', 'success')
         return redirect('/dashboard')
     
@@ -3030,7 +3479,8 @@ def admin_ban_user(user_id):
     user.ban_reason = request.form.get('reason', 'Violation of terms')
     db.session.commit()
     
-    flash(f'✅ User {user.username} banned!', 'success')
+    log_activity(user.id, 'admin_ban', f'Banned by admin. Reason: {user.ban_reason}')
+    flash(f'✅ User {user.username} banned successfully!', 'success')
     return redirect('/admin/users')
 
 @app.route('/admin/user/<int:user_id>/unban', methods=['POST'])
@@ -3043,7 +3493,8 @@ def admin_unban_user(user_id):
     user.ban_reason = None
     db.session.commit()
     
-    flash(f'✅ User {user.username} unbanned!', 'success')
+    log_activity(user.id, 'admin_unban', 'Unbanned by admin')
+    flash(f'✅ User {user.username} unbanned successfully!', 'success')
     return redirect('/admin/users')
 
 @app.route('/admin/user/<int:user_id>/edit', methods=['GET', 'POST'])
@@ -3061,9 +3512,11 @@ def admin_edit_user(user_id):
         user.daily_limit = int(request.form.get('daily_limit', 0))
         user.balance = float(request.form.get('balance', 0))
         user.trust_score = int(request.form.get('trust_score', 0))
+        user.is_active = 'is_active' in request.form
         
         db.session.commit()
-        flash(f'✅ User {user.username} updated!', 'success')
+        log_activity(user.id, 'admin_edit', 'Edited by admin')
+        flash(f'✅ User {user.username} updated successfully!', 'success')
         return redirect('/admin/users')
     
     return render_template_string("""
@@ -3187,8 +3640,10 @@ def verify_payment(tx_id):
         tier = tx.tier
         tier_limits = {'BEGINNER': 6, 'EXPERT': 10, 'LEGEND': 15}
         user.tier = tier
-        user.daily_limit = tier_limits.get(tier, 2)
+        user.daily_limit = tier_limits.get(tier, 0)
         db.session.commit()
+        
+        log_activity(user.id, 'admin_verify_payment', f'Verified payment for {tier} tier')
         flash(f'✅ {user.username} upgraded to {tier.title()}! Now has {user.daily_limit} tasks per day!', 'success')
     
     db.session.commit()
@@ -3229,12 +3684,14 @@ if __name__ == '__main__':
     print("   /register - REGISTER_PAGE")
     print("   /dashboard - DASHBOARD_PAGE")
     print("   /earn - EARN_PAGE")
+    print("   /share_task - SHARE_TASK_PAGE")
     print("   /referral - REFERRAL_PAGE")
     print("   /upgrade - UPGRADE_PAGE")
     print("   /withdraw - WITHDRAW_PAGE")
     print("   /account - ACCOUNT_PAGE")
     print("   /change_password - CHANGE_PASSWORD_PAGE")
     print("   /support - SUPPORT_PAGE")
+    print("   /upgrade_required - UPGRADE_REQUIRED_PAGE")
     print("   /admin/login - ADMIN_LOGIN_PAGE")
     print("   /admin/dashboard - ADMIN_DASHBOARD_PAGE")
     print("   /admin/users - ADMIN_USERS_PAGE")
@@ -3242,7 +3699,7 @@ if __name__ == '__main__':
     print("   /admin/support - ADMIN_SUPPORT_PAGE")
     print("=" * 60)
     print("📊 TRUST SCORE TIERS:")
-    print(f"   FREE: 0 points")
+    print(f"   FREE: 0 points (NO TASKS)")
     print(f"   BEGINNER: 100 points")
     print(f"   EXPERT: 300 points")
     print(f"   LEGEND: 700 points")
@@ -3250,6 +3707,12 @@ if __name__ == '__main__':
     print("📅 Withdrawal Settings:")
     print(f"   Minimum: ₦{MINIMUM_WITHDRAWAL:,}")
     print(f"   Days: 10th and 30th of every month")
+    print("=" * 60)
+    print("📊 Tier Task Limits:")
+    print(f"   FREE: {TIER_TASKS['FREE']} tasks/day (NO TASKS)")
+    print(f"   BEGINNER: {TIER_TASKS['BEGINNER']} tasks/day")
+    print(f"   EXPERT: {TIER_TASKS['EXPERT']} tasks/day")
+    print(f"   LEGEND: {TIER_TASKS['LEGEND']} tasks/day")
     print("=" * 60)
     print("🔐 Admin Panel:")
     print(f"   URL: http://127.0.0.1:5000/admin/login")
