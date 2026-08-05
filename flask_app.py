@@ -18,7 +18,7 @@ app.secret_key = 'your-super-secret-key-change-this-12345'
 # DATABASE_URL = 'postgresql://username:password@localhost/earnnpay_db'
 
 # For production (Render, Heroku, etc.) - Use environment variable
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:password@localhost/earnnpay_db')
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # Parse the URL for SQLAlchemy
 if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
