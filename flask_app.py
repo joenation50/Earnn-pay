@@ -2018,7 +2018,7 @@ WITHDRAW_PAGE = """
             <div style="display:flex;align-items:center;gap:8px;">
                 <span style="font-size:20px;">📅</span>
                 <div>
-                    <strong>Withdrawal Days: 10th & 30th of every month</strong>
+                    <strong>Withdrawal Days: 5th & 30th of every month</strong>
                     <div style="font-size:13px;color:var(--text-light);">
                         {% if can_withdraw %}
                             ✅ <span style="color:var(--success);">Today is a withdrawal day!</span>
@@ -2064,7 +2064,7 @@ WITHDRAW_PAGE = """
                     <button type="submit" class="btn btn-success">💸 Request Withdrawal</button>
                 {% else %}
                     <button type="button" class="btn btn-secondary btn-disabled" style="cursor:not-allowed;">
-                        🔒 Withdrawals on 10th & 30th only
+                        🔒 Withdrawals on 5th & 30th only
                     </button>
                     <p style="font-size:12px;color:var(--text-light);text-align:center;margin-top:8px;">
                         Next withdrawal: <strong>{{ next_date.strftime('%B %d, %Y') }}</strong>
@@ -3366,7 +3366,7 @@ def withdraw_page():
     
     if request.method == 'POST':
         if not can_withdraw:
-            flash(f'❌ Withdrawals are only allowed on the 10th and 30th of each month. Next withdrawal date: {next_date.strftime("%B %d, %Y")}', 'error')
+            flash(f'❌ Withdrawals are only allowed on the 5th and 30th of each month. Next withdrawal date: {next_date.strftime("%B %d, %Y")}', 'error')
             return redirect('/withdraw')
         
         amount = float(request.form.get('amount', 0))
@@ -3706,7 +3706,7 @@ if __name__ == '__main__':
     print("=" * 60)
     print("📅 Withdrawal Settings:")
     print(f"   Minimum: ₦{MINIMUM_WITHDRAWAL:,}")
-    print(f"   Days: 10th and 30th of every month")
+    print(f"   Days: 5th and 30th of every month")
     print("=" * 60)
     print("📊 Tier Task Limits:")
     print(f"   FREE: {TIER_TASKS['FREE']} tasks/day (NO TASKS)")
