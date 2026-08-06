@@ -218,148 +218,8 @@ class UserActivity(db.Model):
     ip_address = db.Column(db.String(50), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-class DailyBonus(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    bonus_amount = db.Column(db.Float, default=10)
-    claimed_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-class WithdrawalDay(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.Date, unique=True, nullable=False)
-    is_withdrawal_day = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-# ==================== CONFIGURATION ====================
-ADMIN_USERNAME = 'admin'
-ADMIN_PASSWORD = 'admin123'
-REFERRAL_BONUS = 500
-MINIMUM_WITHDRAWAL = 10000
-WITHDRAWAL_DAYS = [10, 30]
-
-TIER_THRESHOLDS = {
-    'FREE': 0,
-    'BEGINNER': 100,
-    'EXPERT': 300,
-    'LEGEND': 700
-}
-
-TIER_TASKS = {
-    'FREE': 0,
-    'BEGINNER': 6,
-    'EXPERT': 10,
-    'LEGEND': 15
-}
-
-TIER_PRICES = {
-    'BEGINNER': 1000,
-    'EXPERT': 3500,
-    'LEGEND': 10000
-}
-
-TIER_NAMES = {
-    'FREE': 'Free',
-    'BEGINNER': 'Beginner',
-    'EXPERT': 'Expert',
-    'LEGEND': 'Legend'
-}
-
-# ==================== GOOGLE TRUSTED REVIEWS ====================
-GOOGLE_REVIEWS = [
-    {'name': 'Chidi O.', 'rating': 5, 'text': 'Absolutely love this platform! Earned N25,000 in my first month!', 'verified': True},
-    {'name': 'Ngozi E.', 'rating': 5, 'text': 'The referral system is amazing. I got N500 when my friend joined!', 'verified': True},
-    {'name': 'Emeka N.', 'rating': 4, 'text': 'Great platform for extra income. Tasks are simple and payments are fast.', 'verified': True},
-    {'name': 'Aisha B.', 'rating': 5, 'text': 'I recommend EarnPay to everyone. Legit and reliable!', 'verified': True},
-    {'name': 'Tunde A.', 'rating': 5, 'text': 'Upgraded to Expert tier and earning more now. Worth every naira!', 'verified': True},
-]
-
-FAKE_REVIEWS = [
-    {'name': 'Chioma O.', 'review': 'I earned N15,000 in just 2 weeks! This platform is amazing!', 'rating': 5, 'time': '2 hours ago'},
-    {'name': 'Emeka N.', 'review': 'The referral bonus is legit. I got N500 when my friend joined!', 'rating': 5, 'time': '5 hours ago'},
-    {'name': 'Aisha B.', 'review': 'Best earning platform in Nigeria. Tasks are simple and payments are fast!', 'rating': 5, 'time': '1 day ago'},
-    {'name': 'Tunde A.', 'review': 'Upgraded to Expert tier and earning N450 per review now. Worth it!', 'rating': 4, 'time': '2 days ago'},
-    {'name': 'Ngozi E.', 'review': 'I love how easy it is to withdraw my earnings. Received in 24 hours!', 'rating': 5, 'time': '3 days ago'},
-]
-
-# ==================== HELPER FUNCTIONS ====================
-def can_withdraw_today():
-    now = datetime.now()
-    day = now.day
-    return day in WITHDRAWAL_DAYS
-
-def get_next_withdrawal_date():
-    now = datetime.now()
-    current_day = now.day
-    current_month = now.month
-    current_year = now.year
-    
-    if current_day in WITHDRAWAL_DAYS:
-        return now.date()
-    
-    for day in sorted(WITHDRAWAL_DAYS):
-        if day > current_day:
-            try:
-                return datetime(current_year, current_month, day).date()
-            except ValueError:
-                continue
-    
-    next_month = current_month + 1
-    next_year = current_year
-    if next_month > 12:
-        next_month = 1
-        next_year += 1
-    
-    for day in sorted(WITHDRAWAL_DAYS):
-        try:
-            return datetime(next_year, next_month, day).date()
-        except ValueError:
-            continue
-    
-    return datetime(next_year, next_month, 10).date()
-
-def get_payment_settings():
-    settings = PaymentSettings.query.first()
-    if not settings:
-        settings = PaymentSettings(
-            bank_name='GTBank',
-            account_name='Earn Pay Labs Ltd',
-            account_number='0123456789'
-        )
-        db.session.add(settings)
-        db.session.commit()
-    return settings
-
-def get_tier_from_score(score):
-    if score >= TIER_THRESHOLDS['LEGEND']:
-        return 'LEGEND'
-    elif score >= TIER_THRESHOLDS['EXPERT']:
-        return 'EXPERT'
-    elif score >= TIER_THRESHOLDS['BEGINNER']:
-        return 'BEGINNER'
-    else:
-        return 'FREE'
-
-def get_next_tier_info(current_tier, current_score):
-    tiers = ['FREE', 'BEGINNER', 'EXPERT', 'LEGEND']
-    if current_tier in tiers:
-        idx = tiers.index(current_tier)
-        if idx < len(tiers) - 1:
-            next_tier = tiers[idx + 1]
-            needed = TIER_THRESHOLDS[next_tier] - current_score
-            return next_tier, max(0, needed)
-    return None, 0
-
-def log_activity(user_id, action, details=None, ip=None):
-    activity = UserActivity(
-        user_id=user_id,
-        action=action,
-        details=details,
-        ip_address=ip
-    )
-    db.session.add(activity)
-    db.session.commit()
-
-def create_tables():
+# ==================== CREATE TABLES ====================
+with app.app_context():
     db.create_all()
     
     if PaymentSettings.query.count() == 0:
@@ -414,7 +274,129 @@ def create_tables():
             db.session.add(task)
         db.session.commit()
 
-# ==================== PROFESSIONAL STYLES ====================
+# ==================== CONFIGURATION ====================
+ADMIN_USERNAME = 'admin'
+ADMIN_PASSWORD = 'admin123'
+REFERRAL_BONUS = 500
+MINIMUM_WITHDRAWAL = 10000
+WITHDRAWAL_DAYS = [5, 30]  # Changed to 5th and 30th
+
+TIER_THRESHOLDS = {
+    'FREE': 0,
+    'BEGINNER': 100,
+    'EXPERT': 300,
+    'LEGEND': 700
+}
+
+TIER_TASKS = {
+    'FREE': 0,
+    'BEGINNER': 6,
+    'EXPERT': 10,
+    'LEGEND': 15
+}
+
+TIER_PRICES = {
+    'BEGINNER': 1000,
+    'EXPERT': 3500,
+    'LEGEND': 10000
+}
+
+# ==================== GOOGLE TRUSTED REVIEWS ====================
+GOOGLE_REVIEWS = [
+    {'name': 'Chidi O.', 'rating': 5, 'text': 'Absolutely love this platform! Earned N25,000 in my first month!', 'verified': True},
+    {'name': 'Ngozi E.', 'rating': 5, 'text': 'The referral system is amazing. I got N500 when my friend joined!', 'verified': True},
+    {'name': 'Emeka N.', 'rating': 4, 'text': 'Great platform for extra income. Tasks are simple and payments are fast.', 'verified': True},
+    {'name': 'Aisha B.', 'rating': 5, 'text': 'I recommend EarnPay to everyone. Legit and reliable!', 'verified': True},
+    {'name': 'Tunde A.', 'rating': 5, 'text': 'Upgraded to Expert tier and earning more now. Worth every naira!', 'verified': True},
+]
+
+FAKE_REVIEWS = [
+    {'name': 'Chioma O.', 'review': 'I earned N15,000 in just 2 weeks! This platform is amazing!', 'rating': 5, 'time': '2 hours ago'},
+    {'name': 'Emeka N.', 'review': 'The referral bonus is legit. I got N500 when my friend joined!', 'rating': 5, 'time': '5 hours ago'},
+    {'name': 'Aisha B.', 'review': 'Best earning platform in Nigeria. Tasks are simple and payments are fast!', 'rating': 5, 'time': '1 day ago'},
+    {'name': 'Tunde A.', 'review': 'Upgraded to Expert tier and earning N450 per review now. Worth it!', 'rating': 4, 'time': '2 days ago'},
+    {'name': 'Ngozi E.', 'review': 'I love how easy it is to withdraw my earnings. Received in 24 hours!', 'rating': 5, 'time': '3 days ago'},
+]
+
+# ==================== HELPER FUNCTIONS ====================
+def can_withdraw_today():
+    now = datetime.now()
+    day = now.day
+    return day in WITHDRAWAL_DAYS
+
+def get_next_withdrawal_date():
+    now = datetime.now()
+    current_day = now.day
+    current_month = now.month
+    current_year = now.year
+    
+    if current_day in WITHDRAWAL_DAYS:
+        return now.date()
+    
+    for day in sorted(WITHDRAWAL_DAYS):
+        if day > current_day:
+            try:
+                return datetime(current_year, current_month, day).date()
+            except ValueError:
+                continue
+    
+    next_month = current_month + 1
+    next_year = current_year
+    if next_month > 12:
+        next_month = 1
+        next_year += 1
+    
+    for day in sorted(WITHDRAWAL_DAYS):
+        try:
+            return datetime(next_year, next_month, day).date()
+        except ValueError:
+            continue
+    
+    return datetime(next_year, next_month, 5).date()
+
+def get_payment_settings():
+    settings = PaymentSettings.query.first()
+    if not settings:
+        settings = PaymentSettings(
+            bank_name='GTBank',
+            account_name='Earn Pay Labs Ltd',
+            account_number='0123456789'
+        )
+        db.session.add(settings)
+        db.session.commit()
+    return settings
+
+def get_tier_from_score(score):
+    if score >= TIER_THRESHOLDS['LEGEND']:
+        return 'LEGEND'
+    elif score >= TIER_THRESHOLDS['EXPERT']:
+        return 'EXPERT'
+    elif score >= TIER_THRESHOLDS['BEGINNER']:
+        return 'BEGINNER'
+    else:
+        return 'FREE'
+
+def get_next_tier_info(current_tier, current_score):
+    tiers = ['FREE', 'BEGINNER', 'EXPERT', 'LEGEND']
+    if current_tier in tiers:
+        idx = tiers.index(current_tier)
+        if idx < len(tiers) - 1:
+            next_tier = tiers[idx + 1]
+            needed = TIER_THRESHOLDS[next_tier] - current_score
+            return next_tier, max(0, needed)
+    return None, 0
+
+def log_activity(user_id, action, details=None, ip=None):
+    activity = UserActivity(
+        user_id=user_id,
+        action=action,
+        details=details,
+        ip_address=ip
+    )
+    db.session.add(activity)
+    db.session.commit()
+
+# ==================== STYLES ====================
 STYLES = """
 :root {
     --primary: #0a0a23;
@@ -1093,7 +1075,6 @@ textarea { min-height: 80px; resize: vertical; }
 .google-review-card .text { font-size: 13px; margin-top: 4px; color: var(--text); }
 .google-review-card .verified { font-size: 11px; color: var(--success); }
 
-/* Share Task Specific Styles */
 .share-platforms {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1706,16 +1687,13 @@ SHARE_TASK_PAGE = """
         <script>
             function markShared(platform) {
                 document.getElementById('platformInput').value = platform;
-                // Show a message that they've shared
                 setTimeout(function() {
                     document.querySelector('.share-confirm').style.borderColor = '#27ae60';
                     document.querySelector('.share-confirm .icon').textContent = '🎉';
                 }, 500);
             }
             
-            // Auto-detect if user is coming back from sharing
             window.addEventListener('focus', function() {
-                // Check if user was on a social media site
                 if (document.referrer.includes('facebook') || 
                     document.referrer.includes('twitter') || 
                     document.referrer.includes('whatsapp') || 
@@ -2310,7 +2288,7 @@ SUPPORT_PAGE = """
 </html>
 """
 
-# ==================== ADMIN_LOGIN_PAGE ====================
+# ==================== ADMIN PAGES ====================
 ADMIN_LOGIN_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -2352,7 +2330,6 @@ ADMIN_LOGIN_PAGE = """
 </html>
 """
 
-# ==================== ADMIN_DASHBOARD_PAGE ====================
 ADMIN_DASHBOARD_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -2374,6 +2351,7 @@ ADMIN_DASHBOARD_PAGE = """
             </div>
             <div><span style="font-size:14px;font-weight:600;">👋 Admin</span><a href="/admin/logout" style="margin-left:8px;color:var(--danger);text-decoration:none;font-size:12px;">🚪 Logout</a></div>
         </div>
+        
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
@@ -2381,12 +2359,14 @@ ADMIN_DASHBOARD_PAGE = """
                 {% endfor %}
             {% endif %}
         {% endwith %}
+        
         <div class="stats-grid" style="margin-bottom:16px;">
             <div class="stat-box" style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;"><div class="value" style="color:white;font-size:32px;">{{ total_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">👥 Total Users</div></div>
             <div class="stat-box" style="background:linear-gradient(135deg,#e94560,#ff6b81);color:white;"><div class="value" style="color:white;font-size:32px;">{{ pending_count }}</div><div class="label" style="color:rgba(255,255,255,0.8);">⏳ Pending</div></div>
             <div class="stat-box" style="background:linear-gradient(135deg,#27ae60,#1a7a3a);color:white;"><div class="value" style="color:white;font-size:32px;">{{ verified_count }}</div><div class="label" style="color:rgba(255,255,255,0.8);">✅ Verified</div></div>
             <div class="stat-box" style="background:linear-gradient(135deg,#f39c12,#e67e22);color:white;"><div class="value" style="color:white;font-size:32px;">{{ open_tickets }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💬 Tickets</div></div>
         </div>
+
         <div class="card">
             <h3>📊 Payment Requests</h3>
             {% if pending_transactions %}
@@ -2407,17 +2387,55 @@ ADMIN_DASHBOARD_PAGE = """
                 <p class="text-center text-muted">🎉 No pending payments</p>
             {% endif %}
         </div>
+
+        <div class="card" style="border:2px solid var(--success);">
+            <h3>✅ Paid Users (Upgraded Tiers)</h3>
+            {% set paid_users_list = all_users|selectattr('tier', 'ne', 'FREE')|list %}
+            {% if paid_users_list %}
+                {% for user in paid_users_list %}
+                <div style="padding:8px 0;border-bottom:1px solid var(--border);">
+                    <div class="flex-between">
+                        <div>
+                            <strong>{{ user.username }}</strong>
+                            <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                            <span style="font-size:10px;color:#27ae60;margin-left:4px;">✅ PAID</span>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:12px;">💰 ₦{{ "%.2f"|format(user.balance) }}</div>
+                            <div style="font-size:12px;color:var(--text-light);">⭐ {{ user.trust_score }} pts</div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p class="text-center text-muted">No paid users yet</p>
+            {% endif %}
+        </div>
+
         <div class="card">
             <h3>📊 All Users</h3>
             {% for user in all_users %}
             <div style="padding:8px 0;border-bottom:1px solid var(--border);">
                 <div class="flex-between">
-                    <div><strong>{{ user.username }}</strong><span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span><span style="font-size:10px;color:#27ae60;margin-left:4px;">+₦{{ "%.0f"|format(user.referral_bonus_earned) }}</span></div>
-                    <div style="text-align:right;"><div style="font-size:12px;">💰 ₦{{ "%.2f"|format(user.balance) }}</div><div style="font-size:12px;color:var(--text-light);">⭐ {{ user.trust_score }} pts</div></div>
+                    <div>
+                        <strong>{{ user.username }}</strong>
+                        <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                        {% if user.tier != 'FREE' %}
+                            <span style="font-size:10px;color:#27ae60;margin-left:4px;">💰 PAID</span>
+                        {% else %}
+                            <span style="font-size:10px;color:var(--text-muted);margin-left:4px;">FREE</span>
+                        {% endif %}
+                        <span style="font-size:10px;color:#27ae60;margin-left:4px;">+₦{{ "%.0f"|format(user.referral_bonus_earned) }}</span>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:12px;">💰 ₦{{ "%.2f"|format(user.balance) }}</div>
+                        <div style="font-size:12px;color:var(--text-light);">⭐ {{ user.trust_score }} pts</div>
+                    </div>
                 </div>
             </div>
             {% endfor %}
         </div>
+
         <nav class="bottom-nav">
             <a href="/" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">🏠</span><span class="label">Home</span></a>
             <a href="/admin/users" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">📊</span><span class="label">Users</span></a>
@@ -2430,7 +2448,6 @@ ADMIN_DASHBOARD_PAGE = """
 </html>
 """
 
-# ==================== ADMIN_USERS_PAGE ====================
 ADMIN_USERS_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -2497,7 +2514,6 @@ ADMIN_USERS_PAGE = """
 </html>
 """
 
-# ==================== ADMIN_SETTINGS_PAGE ====================
 ADMIN_SETTINGS_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -2563,7 +2579,6 @@ ADMIN_SETTINGS_PAGE = """
 </html>
 """
 
-# ==================== ADMIN_SUPPORT_PAGE ====================
 ADMIN_SUPPORT_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -2626,10 +2641,143 @@ ADMIN_SUPPORT_PAGE = """
 </html>
 """
 
+# ==================== UPGRADE_REQUIRED_PAGE ====================
+UPGRADE_REQUIRED_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upgrade Required - Earn'n'Pay Labs</title>
+    <style>""" + STYLES + """</style>
+</head>
+<body data-theme="{{ user.theme if user else 'light' }}">
+    <div class="page-transition">
+        <div class="top-header">
+            <div class="logo-container">
+                <div class="logo-icon"><span>💰</span></div>
+                <div class="logo-text">
+                    <span class="main">Earn'n'Pay</span>
+                    <span class="sub">Labs <span>•</span> Upgrade Required</span>
+                </div>
+            </div>
+            <div class="user-actions">
+                <div class="user-info">
+                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
+                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
+                </div>
+                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+            </div>
+        </div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="card" style="text-align:center;background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--gold);padding:30px 20px;">
+            <div style="font-size:64px;">⬆️</div>
+            <h2 style="color:var(--text);font-size:24px;">Upgrade Required</h2>
+            <p class="text-muted" style="font-size:16px;margin:12px 0;">You need to upgrade your tier to access all features and start earning!</p>
+            <div style="background:white;padding:16px;border-radius:var(--radius-sm);margin:16px 0;">
+                <div style="font-size:14px;color:var(--text-light);">Current Tier</div>
+                <div style="font-size:28px;font-weight:800;color:var(--text);">{{ user.tier }}</div>
+                <div style="font-size:14px;color:var(--text-light);">📝 {{ user.daily_limit }} tasks/day</div>
+            </div>
+            <a href="/upgrade" class="btn btn-gold" style="font-size:18px;padding:16px;">🚀 Upgrade Now</a>
+            <p style="font-size:12px;color:var(--text-muted);margin-top:12px;">💡 Upgrade to unlock higher paying tasks and earn more!</p>
+        </div>
+        
+        <div class="card" style="background:linear-gradient(135deg,#f8f9fa,white);">
+            <h3>🎯 Benefits of Upgrading</h3>
+            <div style="margin-top:8px;">
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);">
+                    <span style="font-size:20px;">💰</span>
+                    <div><strong>Higher Earnings</strong><br><span class="text-muted">Earn up to ₦1,000 per task</span></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);">
+                    <span style="font-size:20px;">📝</span>
+                    <div><strong>More Tasks</strong><br><span class="text-muted">Access 15+ tasks daily</span></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
+                    <span style="font-size:20px;">⭐</span>
+                    <div><strong>Premium Features</strong><br><span class="text-muted">Exclusive tasks and higher rewards</span></div>
+                </div>
+            </div>
+        </div>
+        
+        <nav class="bottom-nav">
+            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
+            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
+            <a href="/upgrade" class="active"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
+            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
+            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
+        </nav>
+    </div>
+</body>
+</html>
+"""
+
 # ==================== ROUTES ====================
 
 with app.app_context():
-    create_tables()
+    db.create_all()
+    
+    if PaymentSettings.query.count() == 0:
+        default_settings = PaymentSettings(
+            bank_name='GTBank',
+            account_name='Earn Pay Labs Ltd',
+            account_number='0123456789'
+        )
+        db.session.add(default_settings)
+        db.session.commit()
+    
+    if Task.query.count() == 0:
+        default_tasks = [
+            Task(title='Google Review', description='Leave a genuine 5-star review on Google', 
+                 task_type='REVIEW', reward=50, tier_required='FREE'),
+            Task(title='Ad Click', description='Visit a site and earn N40 instantly', 
+                 task_type='ADS', reward=40, tier_required='FREE'),
+            Task(title='Share & Earn', description='Share our website on social media and earn N100', 
+                 task_type='SHARE', reward=100, tier_required='FREE'),
+            Task(title='Google Review', description='Leave a genuine 5-star review on Google', 
+                 task_type='REVIEW', reward=150, tier_required='BEGINNER'),
+            Task(title='Ad Click', description='Visit a site and earn N40 instantly', 
+                 task_type='ADS', reward=120, tier_required='BEGINNER'),
+            Task(title='Premium Review', description='Write detailed review for higher pay', 
+                 task_type='REVIEW', reward=200, tier_required='BEGINNER'),
+            Task(title='Survey', description='Complete survey and earn big', 
+                 task_type='SURVEY', reward=180, tier_required='BEGINNER'),
+            Task(title='Google Review', description='Leave a genuine 5-star review on Google', 
+                 task_type='REVIEW', reward=450, tier_required='EXPERT'),
+            Task(title='Ad Click', description='Visit a site and earn N40 instantly', 
+                 task_type='ADS', reward=400, tier_required='EXPERT'),
+            Task(title='Premium Review', description='Write detailed review for higher pay', 
+                 task_type='REVIEW', reward=500, tier_required='EXPERT'),
+            Task(title='Survey', description='Complete survey and earn big', 
+                 task_type='SURVEY', reward=480, tier_required='EXPERT'),
+            Task(title='Video Task', description='Watch video and earn', 
+                 task_type='VIDEO', reward=350, tier_required='EXPERT'),
+            Task(title='Google Review', description='Leave a genuine 5-star review on Google', 
+                 task_type='REVIEW', reward=1000, tier_required='LEGEND'),
+            Task(title='Ad Click', description='Visit a site and earn N40 instantly', 
+                 task_type='ADS', reward=900, tier_required='LEGEND'),
+            Task(title='Premium Review', description='Write detailed review for higher pay', 
+                 task_type='REVIEW', reward=1100, tier_required='LEGEND'),
+            Task(title='Survey', description='Complete survey and earn big', 
+                 task_type='SURVEY', reward=1050, tier_required='LEGEND'),
+            Task(title='Video Task', description='Watch video and earn', 
+                 task_type='VIDEO', reward=950, tier_required='LEGEND'),
+            Task(title='Expert Task', description='Complete expert level task', 
+                 task_type='REVIEW', reward=1200, tier_required='LEGEND'),
+        ]
+        for task in default_tasks:
+            db.session.add(task)
+        db.session.commit()
+
+# ==================== ROUTES ====================
 
 @app.route('/')
 def home():
@@ -2662,26 +2810,44 @@ def register():
         user.referral_code = user.generate_referral_code()
         user.daily_limit = 0  # No tasks for free tier
         
+        # ===== REFERRAL SYSTEM - FIXED! =====
         ref_code = request.args.get('ref', '')
+        referrer = None
+        
         if ref_code:
             referrer = User.query.filter_by(referral_code=ref_code).first()
             if referrer:
                 user.referred_by = referrer.id
+                # Award bonus to referrer
                 bonus_amount = REFERRAL_BONUS
                 referrer.balance += bonus_amount
                 referrer.commission_balance += bonus_amount
                 referrer.trust_score += 1
                 referrer.referral_bonus_earned += bonus_amount
                 referrer.total_referrals += 1
+                
+                # Create referral record (will update after user commit)
                 db.session.add(referrer)
                 flash(f'🎉 You were referred by {referrer.username}! You both get ₦{bonus_amount}!', 'success')
             else:
                 flash('Invalid referral code!', 'error')
-        else:
-            flash('✅ Registration successful! Please login.', 'success')
         
         db.session.add(user)
         db.session.commit()
+        
+        # Create referral record with user.id after commit
+        if referrer and user.id:
+            referral = Referral(
+                referrer_id=referrer.id,
+                referred_id=user.id,
+                bonus_amount=REFERRAL_BONUS,
+                bonus_paid=True,
+                verified=True
+            )
+            db.session.add(referral)
+            db.session.commit()
+        
+        flash('✅ Registration successful! Please login.', 'success')
         return redirect('/login')
     
     return render_template_string(REGISTER_PAGE)
@@ -2733,7 +2899,6 @@ def dashboard():
         flash(f'❌ Your account has been banned. Reason: {user.ban_reason or "Violation of terms"}', 'error')
         return redirect('/login')
     
-    # Check if user has upgraded (tier is not FREE or has tasks)
     if user.tier == 'FREE' and user.daily_limit == 0:
         flash('⚠️ You need to upgrade your tier to access all features!', 'info')
         return render_template_string(UPGRADE_REQUIRED_PAGE, user=user)
@@ -2821,7 +2986,6 @@ def share_task():
         platform = request.form.get('platform', 'social')
         bonus = 100
         
-        # Check if user already completed share task today
         today = datetime.now().date()
         share_task_obj = Task.query.filter_by(task_type='SHARE', is_active=True).first()
         if share_task_obj:
@@ -2838,12 +3002,10 @@ def share_task():
         user.balance += bonus
         user.trust_score += 1
         
-        # Create task completion record
-        share_task = Task.query.filter_by(task_type='SHARE', is_active=True).first()
-        if share_task:
+        if share_task_obj:
             completion = TaskCompletion(
                 user_id=user.id,
-                task_id=share_task.id,
+                task_id=share_task_obj.id,
                 proof_text=f'Shared on {platform}'
             )
             db.session.add(completion)
@@ -2853,7 +3015,12 @@ def share_task():
         flash(f'✅ Thank you for sharing! +₦{bonus}', 'success')
         return redirect('/earn')
     
-    share_url = f"http://127.0.0.1:5000/register?ref={user.referral_code}"
+    if request.host.startswith('127.0.0.1') or request.host.startswith('localhost'):
+        base_url = f"http://{request.host}"
+    else:
+        base_url = f"https://{request.host}"
+    
+    share_url = f"{base_url}/register?ref={user.referral_code}"
     share_text = f"Join Earn'n'Pay Labs and start earning real cash! Use my referral link: {share_url}"
     
     return render_template_string(SHARE_TASK_PAGE,
@@ -2865,87 +3032,6 @@ def share_task():
         twitter_link=f"https://twitter.com/intent/tweet?text={share_text}",
         telegram_link=f"https://t.me/share/url?url={share_url}&text={share_text}"
     )
-
-# ==================== UPGRADE_REQUIRED_PAGE ====================
-UPGRADE_REQUIRED_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upgrade Required - Earn'n'Pay Labs</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body data-theme="{{ user.theme if user else 'light' }}">
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>💰</span></div>
-                <div class="logo-text">
-                    <span class="main">Earn'n'Pay</span>
-                    <span class="sub">Labs <span>•</span> Upgrade Required</span>
-                </div>
-            </div>
-            <div class="user-actions">
-                <div class="user-info">
-                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
-                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
-                </div>
-                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
-            </div>
-        </div>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        <div class="card" style="text-align:center;background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--gold);padding:30px 20px;">
-            <div style="font-size:64px;">⬆️</div>
-            <h2 style="color:var(--text);font-size:24px;">Upgrade Required</h2>
-            <p class="text-muted" style="font-size:16px;margin:12px 0;">You need to upgrade your tier to access all features and start earning!</p>
-            <div style="background:white;padding:16px;border-radius:var(--radius-sm);margin:16px 0;">
-                <div style="font-size:14px;color:var(--text-light);">Current Tier</div>
-                <div style="font-size:28px;font-weight:800;color:var(--text);">{{ user.tier }}</div>
-                <div style="font-size:14px;color:var(--text-light);">📝 {{ user.daily_limit }} tasks/day</div>
-            </div>
-            <a href="/upgrade" class="btn btn-gold" style="font-size:18px;padding:16px;">🚀 Upgrade Now</a>
-            <p style="font-size:12px;color:var(--text-muted);margin-top:12px;">💡 Upgrade to unlock higher paying tasks and earn more!</p>
-        </div>
-        
-        <div class="card" style="background:linear-gradient(135deg,#f8f9fa,white);">
-            <h3>🎯 Benefits of Upgrading</h3>
-            <div style="margin-top:8px;">
-                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);">
-                    <span style="font-size:20px;">💰</span>
-                    <div><strong>Higher Earnings</strong><br><span class="text-muted">Earn up to ₦1,000 per task</span></div>
-                </div>
-                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);">
-                    <span style="font-size:20px;">📝</span>
-                    <div><strong>More Tasks</strong><br><span class="text-muted">Access 15+ tasks daily</span></div>
-                </div>
-                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
-                    <span style="font-size:20px;">⭐</span>
-                    <div><strong>Premium Features</strong><br><span class="text-muted">Exclusive tasks and higher rewards</span></div>
-                </div>
-            </div>
-        </div>
-        
-        <nav class="bottom-nav">
-            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
-            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
-            <a href="/upgrade" class="active"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
-            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
-            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
-        </nav>
-    </div>
-</body>
-</html>
-"""
-
-# ==================== REST OF ROUTES ====================
 
 @app.route('/account')
 def account_page():
@@ -3143,7 +3229,6 @@ def earn():
         flash('❌ Your account has been banned.', 'error')
         return redirect('/login')
     
-    # Check if user has upgraded
     if user.tier == 'FREE' and user.daily_limit == 0:
         flash('⚠️ You need to upgrade your tier to access tasks!', 'error')
         return redirect('/upgrade')
@@ -3191,7 +3276,6 @@ def complete_task(task_id):
         flash('❌ Your account has been banned.', 'error')
         return redirect('/login')
     
-    # Check if user has upgraded
     if user.tier == 'FREE' and user.daily_limit == 0:
         flash('⚠️ You need to upgrade your tier to access tasks!', 'error')
         return redirect('/upgrade')
@@ -3264,9 +3348,16 @@ def referral_page():
             referred_users.append(referred)
             downline[referred.tier] += 1
     
+    if request.host.startswith('127.0.0.1') or request.host.startswith('localhost'):
+        base_url = f"http://{request.host}"
+    else:
+        base_url = f"https://{request.host}"
+    
+    referral_link = f"{base_url}/register?ref={user.referral_code}"
+    
     return render_template_string(REFERRAL_PAGE,
         user=user,
-        referral_link=f"http://earnnpay-jw76.onrender.com/register?ref={user.referral_code}",
+        referral_link=referral_link,
         referrals=referred_users,
         total_invites=len(referrals),
         verified_users=sum(1 for r in referrals if r.verified),
@@ -3436,13 +3527,20 @@ def admin_dashboard():
         return redirect('/admin/login')
     
     pending = Transaction.query.filter_by(status='PENDING').all()
+    pending_transactions = []
+    for tx in pending:
+        user = User.query.get(tx.user_id)
+        tx_dict = tx.to_dict()
+        tx_dict['username'] = user.username if user else 'Unknown User'
+        pending_transactions.append(tx_dict)
+    
     all_users = User.query.all()
     verified_count = Transaction.query.filter_by(status='VERIFIED').count()
     total_withdrawals = Withdrawal.query.count()
     open_tickets = SupportTicket.query.filter_by(status='OPEN').count()
     
     return render_template_string(ADMIN_DASHBOARD_PAGE,
-        pending_transactions=pending,
+        pending_transactions=pending_transactions,
         pending_count=len(pending),
         verified_count=verified_count,
         total_withdrawals=total_withdrawals,
@@ -3675,6 +3773,7 @@ if __name__ == '__main__':
     print("=" * 60)
     print("💰 Earn'n'Pay Labs - COMPLETE ULTIMATE VERSION")
     print("=" * 60)
+    print("✅ PostgreSQL Database Connected")
     print("✅ Server starting...")
     print("🌐 Open your browser and go to: http://127.0.0.1:5000")
     print("=" * 60)
@@ -3685,9 +3784,9 @@ if __name__ == '__main__':
     print("   /dashboard - DASHBOARD_PAGE")
     print("   /earn - EARN_PAGE")
     print("   /share_task - SHARE_TASK_PAGE")
-    print("   /referral - REFERRAL_PAGE")
+    print("   /referral - REFERRAL_PAGE (FIXED!)")
     print("   /upgrade - UPGRADE_PAGE")
-    print("   /withdraw - WITHDRAW_PAGE")
+    print("   /withdraw - WITHDRAW_PAGE (5th & 30th)")
     print("   /account - ACCOUNT_PAGE")
     print("   /change_password - CHANGE_PASSWORD_PAGE")
     print("   /support - SUPPORT_PAGE")
