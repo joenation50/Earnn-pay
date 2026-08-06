@@ -279,7 +279,7 @@ ADMIN_USERNAME = 'admin'
 ADMIN_PASSWORD = 'admin123'
 REFERRAL_BONUS = 500
 MINIMUM_WITHDRAWAL = 10000
-WITHDRAWAL_DAYS = [5, 30]  # Changed to 5th and 30th
+WITHDRAWAL_DAYS = [5, 30]
 
 TIER_THRESHOLDS = {
     'FREE': 0,
@@ -300,6 +300,16 @@ TIER_PRICES = {
     'EXPERT': 3500,
     'LEGEND': 10000
 }
+
+# ==================== FAKE TESTIMONIALS FOR SHARING ====================
+SHARE_TESTIMONIALS = [
+    {'name': 'Chidi O.', 'text': 'I earned N25,000 in my first month! This platform is a lifesaver! 🎉', 'rating': 5},
+    {'name': 'Ngozi E.', 'text': 'The referral bonus is amazing! I got N500 when my friend joined. 💰', 'rating': 5},
+    {'name': 'Emeka N.', 'text': 'Finally a legit platform that actually pays! Withdrew N15,000 in 24 hours! ⚡', 'rating': 5},
+    {'name': 'Aisha B.', 'text': 'Best side hustle ever! Simple tasks, instant payments. I recommend to everyone! 🌟', 'rating': 5},
+    {'name': 'Tunde A.', 'text': 'Upgraded to Expert tier and I\'m earning N450 per review. Worth every naira! 🚀', 'rating': 5},
+    {'name': 'Zainab M.', 'text': 'Made over N20,000 in a month working from my phone. Life-changing! 🙌', 'rating': 5},
+]
 
 # ==================== GOOGLE TRUSTED REVIEWS ====================
 GOOGLE_REVIEWS = [
@@ -394,6 +404,19 @@ def log_activity(user_id, action, details=None, ip=None):
         ip_address=ip
     )
     db.session.add(activity)
+    db.session.commit()
+
+def reset_daily_tasks():
+    """Reset daily tasks for all users if 24 hours have passed"""
+    users = User.query.all()
+    now = datetime.now()
+    for user in users:
+        if user.last_task_reset:
+            if now - user.last_task_reset >= timedelta(hours=24):
+                user.daily_tasks_completed = 0
+                user.last_task_reset = now
+        else:
+            user.last_task_reset = now
     db.session.commit()
 
 # ==================== STYLES ====================
@@ -616,41 +639,19 @@ body {
     box-shadow: 0 4px 20px rgba(231, 76, 60, 0.3);
 }
 .btn-share {
-    background: linear-gradient(135deg, #1DA1F2, #0D8BD4);
-    color: white;
-    padding: 10px 18px;
-    font-size: 13px;
-    font-weight: 600;
-    width: auto;
-    border-radius: 50px;
-}
-.btn-whatsapp {
     background: linear-gradient(135deg, #25D366, #128C7E);
     color: white;
-    padding: 10px 18px;
-    font-size: 13px;
+    padding: 12px 20px;
+    font-size: 15px;
     font-weight: 600;
     width: auto;
     border-radius: 50px;
+    box-shadow: 0 4px 20px rgba(37, 211, 102, 0.3);
 }
-.btn-facebook {
-    background: linear-gradient(135deg, #1877F2, #0D65D4);
-    color: white;
-    padding: 10px 18px;
-    font-size: 13px;
-    font-weight: 600;
-    width: auto;
-    border-radius: 50px;
-}
-.btn-telegram {
-    background: linear-gradient(135deg, #0088CC, #006699);
-    color: white;
-    padding: 10px 18px;
-    font-size: 13px;
-    font-weight: 600;
-    width: auto;
-    border-radius: 50px;
-}
+.btn-share:hover { transform: scale(1.02); box-shadow: 0 6px 30px rgba(37, 211, 102, 0.4); }
+.btn-facebook { background: linear-gradient(135deg, #1877F2, #0D65D4); color: white; padding: 10px 18px; font-size: 13px; font-weight: 600; width: auto; border-radius: 50px; }
+.btn-telegram { background: linear-gradient(135deg, #0088CC, #006699); color: white; padding: 10px 18px; font-size: 13px; font-weight: 600; width: auto; border-radius: 50px; }
+.btn-twitter { background: linear-gradient(135deg, #1DA1F2, #0D8BD4); color: white; padding: 10px 18px; font-size: 13px; font-weight: 600; width: auto; border-radius: 50px; }
 
 .tier-badge {
     padding: 4px 14px;
@@ -1109,7 +1110,7 @@ textarea { min-height: 80px; resize: vertical; }
 
 # ==================== PAGE DEFINITIONS ====================
 
-# LANDING_PAGE (Home)
+# ==================== LANDING_PAGE ====================
 LANDING_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -1638,28 +1639,41 @@ SHARE_TASK_PAGE = """
                 📋 Copy Link
             </button>
         </div>
-        
-        <div class="card">
-            <h3>🌐 Share on Social Media</h3>
-            <p class="text-muted" style="font-size:13px;">Choose a platform to share and earn your reward</p>
-            <div class="share-platforms">
-                <a href="{{ whatsapp_link }}" target="_blank" class="share-platform" onclick="markShared('WhatsApp')">
-                    <span class="platform-icon">💬</span>
-                    <span class="platform-name">WhatsApp</span>
-                </a>
-                <a href="{{ facebook_link }}" target="_blank" class="share-platform" onclick="markShared('Facebook')">
-                    <span class="platform-icon">👍</span>
-                    <span class="platform-name">Facebook</span>
-                </a>
-                <a href="{{ twitter_link }}" target="_blank" class="share-platform" onclick="markShared('Twitter')">
-                    <span class="platform-icon">🐦</span>
-                    <span class="platform-name">Twitter</span>
-                </a>
-                <a href="{{ telegram_link }}" target="_blank" class="share-platform" onclick="markShared('Telegram')">
-                    <span class="platform-icon">✈️</span>
-                    <span class="platform-name">Telegram</span>
+
+        <!-- WhatsApp Share Button -->
+        <div class="card" style="background:linear-gradient(135deg,#25D366,#128C7E);color:white;text-align:center;border:none;">
+            <div style="font-size:48px;">💬</div>
+            <h2 style="color:white;">Share on WhatsApp</h2>
+            <p style="opacity:0.9;">Share directly with friends and family!</p>
+            <div style="margin-top:16px;">
+                <a href="{{ whatsapp_link }}" target="_blank" class="btn btn-share" style="background:white;color:#25D366;font-size:18px;padding:14px 24px;">
+                    📱 Share on WhatsApp
                 </a>
             </div>
+        </div>
+
+        <!-- Share Message Preview -->
+        <div class="card">
+            <h3>📋 Your Share Message</h3>
+            <div style="background:var(--bg);padding:16px;border-radius:var(--radius-sm);margin-top:8px;font-size:14px;line-height:1.6;">
+                <p><strong>💰 Earn Real Cash with Earn'n'Pay Labs!</strong></p>
+                <p>Complete simple tasks and get paid instantly!</p>
+                <p>✅ Google Reviews - Earn up to ₦1000</p>
+                <p>✅ Ad Clicks - Earn up to ₦1200</p>
+                <p>✅ Refer Friends - Earn ₦500 bonus</p>
+                <p>✅ Upgrade Tiers - Earn even more!</p>
+                <br>
+                <p>🎉 <strong>Real Testimonials:</strong></p>
+                <p>"I earned N25,000 in my first month!" - Chidi O. ⭐⭐⭐⭐⭐</p>
+                <p>"The referral bonus is amazing! I got N500 when my friend joined!" - Ngozi E. ⭐⭐⭐⭐⭐</p>
+                <p>"Finally a legit platform that actually pays!" - Emeka N. ⭐⭐⭐⭐⭐</p>
+                <br>
+                <p>Join thousands of Nigerians already earning!</p>
+                <p style="font-weight:bold;color:var(--secondary);">Sign up: {{ share_url }}</p>
+            </div>
+            <button onclick="navigator.clipboard.writeText('💰 Earn Real Cash with Earn\'n\'Pay Labs!\\nComplete simple tasks and get paid instantly!\\n\\n✅ Google Reviews - Earn up to ₦1000\\n✅ Ad Clicks - Earn up to ₦1200\\n✅ Refer Friends - Earn ₦500 bonus\\n✅ Upgrade Tiers - Earn even more!\\n\\n🎉 Real Testimonials:\\n"I earned N25,000 in my first month!" - Chidi O. ⭐⭐⭐⭐⭐\\n"The referral bonus is amazing!" - Ngozi E. ⭐⭐⭐⭐⭐\\n"Finally a legit platform that actually pays!" - Emeka N. ⭐⭐⭐⭐⭐\\n\\nJoin thousands of Nigerians already earning!\\nSign up: {{ share_url }}')" class="btn btn-secondary mt-2" style="width:auto;padding:10px 20px;">
+                📋 Copy Full Message
+            </button>
         </div>
         
         <div class="card share-confirm">
@@ -1762,6 +1776,37 @@ REFERRAL_PAGE = """
                 <span style="font-weight:600;">💡 Share your link on social media or with friends!</span>
             </div>
         </div>
+
+        <!-- WhatsApp Share Button on Referral Page -->
+        <div class="card" style="background:linear-gradient(135deg,#25D366,#128C7E);color:white;text-align:center;border:none;">
+            <div style="font-size:32px;">💬</div>
+            <h3 style="color:white;">Share on WhatsApp</h3>
+            <p style="opacity:0.9;font-size:13px;">Share your referral link with friends and earn ₦500!</p>
+            <div style="margin-top:12px;">
+                <a href="{{ whatsapp_link }}" target="_blank" class="btn btn-share" style="background:white;color:#25D366;font-size:16px;padding:12px 20px;">
+                    📱 Share Now
+                </a>
+            </div>
+        </div>
+
+        <!-- Share Message Preview -->
+        <div class="card">
+            <h3>📋 Share Message Preview</h3>
+            <div style="background:var(--bg);padding:12px;border-radius:var(--radius-sm);margin-top:8px;font-size:13px;line-height:1.6;">
+                <p><strong>💰 Join Earn'n'Pay Labs - Earn Real Cash!</strong></p>
+                <p>Complete simple tasks and get paid instantly!</p>
+                <p>✅ Google Reviews - Earn up to ₦1000</p>
+                <p>✅ Ad Clicks - Earn up to ₦1200</p>
+                <p>✅ Refer Friends - Earn ₦500 bonus</p>
+                <br>
+                <p>🎉 <strong>Real Testimonials:</strong></p>
+                <p>"I earned N25,000 in my first month!" - Chidi O. ⭐⭐⭐⭐⭐</p>
+                <p>"Finally a legit platform that actually pays!" - Emeka N. ⭐⭐⭐⭐⭐</p>
+                <br>
+                <p style="font-weight:bold;color:var(--secondary);">Sign up: {{ referral_link }}</p>
+            </div>
+        </div>
+        
         <div class="stats-grid">
             <div class="stat-box"><div class="value">{{ total_invites }}</div><div class="label">📊 Total Invites</div></div>
             <div class="stat-box"><div class="value gold">{{ verified_users }}</div><div class="label">✅ Verified</div></div>
@@ -2809,6 +2854,7 @@ def register():
         user.set_password(password)
         user.referral_code = user.generate_referral_code()
         user.daily_limit = 0  # No tasks for free tier
+        user.last_task_reset = datetime.now()
         
         # ===== REFERRAL SYSTEM - FIXED! =====
         ref_code = request.args.get('ref', '')
@@ -2826,7 +2872,6 @@ def register():
                 referrer.referral_bonus_earned += bonus_amount
                 referrer.total_referrals += 1
                 
-                # Create referral record (will update after user commit)
                 db.session.add(referrer)
                 flash(f'🎉 You were referred by {referrer.username}! You both get ₦{bonus_amount}!', 'success')
             else:
@@ -2884,6 +2929,22 @@ def logout():
     flash('👋 Logged out successfully', 'success')
     return redirect('/login')
 
+# ===== TASK RESET FUNCTION - FIXED =====
+def reset_user_tasks_if_needed(user):
+    """Reset user's daily tasks if 24 hours have passed"""
+    now = datetime.now()
+    if user.last_task_reset:
+        if now - user.last_task_reset >= timedelta(hours=24):
+            user.daily_tasks_completed = 0
+            user.last_task_reset = now
+            return True
+    else:
+        user.last_task_reset = now
+        user.daily_tasks_completed = 0
+        db.session.commit()
+        return True
+    return False
+
 @app.route('/dashboard')
 def dashboard():
     if 'username' not in session:
@@ -2899,21 +2960,18 @@ def dashboard():
         flash(f'❌ Your account has been banned. Reason: {user.ban_reason or "Violation of terms"}', 'error')
         return redirect('/login')
     
+    # Reset tasks if needed
+    reset_user_tasks_if_needed(user)
+    
+    # Check if user has upgraded
     if user.tier == 'FREE' and user.daily_limit == 0:
         flash('⚠️ You need to upgrade your tier to access all features!', 'info')
         return render_template_string(UPGRADE_REQUIRED_PAGE, user=user)
     
     now = datetime.now()
-    if user.last_task_reset:
-        if now - user.last_task_reset >= timedelta(hours=24):
-            user.daily_tasks_completed = 0
-            user.last_task_reset = now
-            db.session.commit()
-    else:
-        user.last_task_reset = now
-        db.session.commit()
-    
     today = datetime.now().date()
+    
+    # Check streak
     if user.last_checkin:
         if user.last_checkin.date() == today - timedelta(days=1):
             user.streak_days += 1
@@ -2921,9 +2979,6 @@ def dashboard():
         elif user.last_checkin.date() != today:
             user.streak_days = 0
     user.last_checkin = datetime.now()
-    
-    if user.last_checkin.date() != today:
-        user.daily_tasks_completed = 0
     
     db.session.commit()
     
@@ -2936,6 +2991,7 @@ def dashboard():
     else:
         progress = 100
     
+    # Get today's tasks
     today_tasks = TaskCompletion.query.filter(
         TaskCompletion.user_id == user.id,
         db.func.date(TaskCompletion.completed_at) == today
@@ -3021,16 +3077,64 @@ def share_task():
         base_url = f"https://{request.host}"
     
     share_url = f"{base_url}/register?ref={user.referral_code}"
-    share_text = f"Join Earn'n'Pay Labs and start earning real cash! Use my referral link: {share_url}"
+    share_text = f"💰 Join Earn'n'Pay Labs and start earning real cash! Complete simple tasks and get paid instantly!\n\n✅ Google Reviews - Earn up to ₦1000\n✅ Ad Clicks - Earn up to ₦1200\n✅ Refer Friends - Earn ₦500 bonus\n\n🎉 Real Testimonials:\n\"I earned N25,000 in my first month!\" - Chidi O. ⭐⭐⭐⭐⭐\n\"Finally a legit platform that actually pays!\" - Emeka N. ⭐⭐⭐⭐⭐\n\nJoin thousands of Nigerians already earning!\nSign up: {share_url}"
+    
+    # WhatsApp link with pre-filled message
+    whatsapp_link = f"https://wa.me/?text={share_text}"
     
     return render_template_string(SHARE_TASK_PAGE,
         user=user,
         share_url=share_url,
         share_text=share_text,
-        whatsapp_link=f"https://wa.me/?text={share_text}",
-        facebook_link=f"https://www.facebook.com/sharer/sharer.php?u={share_url}",
-        twitter_link=f"https://twitter.com/intent/tweet?text={share_text}",
-        telegram_link=f"https://t.me/share/url?url={share_url}&text={share_text}"
+        whatsapp_link=whatsapp_link
+    )
+
+@app.route('/referral')
+def referral_page():
+    if 'username' not in session:
+        return redirect('/login')
+    
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
+        return redirect('/login')
+    
+    if user.is_banned:
+        session.clear()
+        flash('❌ Your account has been banned.', 'error')
+        return redirect('/login')
+    
+    referrals = Referral.query.filter_by(referrer_id=user.id).all()
+    
+    referred_users = []
+    downline = {'FREE': 0, 'BEGINNER': 0, 'EXPERT': 0, 'LEGEND': 0}
+    
+    for ref in referrals:
+        referred = User.query.get(ref.referred_id)
+        if referred:
+            referred_users.append(referred)
+            downline[referred.tier] += 1
+    
+    if request.host.startswith('127.0.0.1') or request.host.startswith('localhost'):
+        base_url = f"http://{request.host}"
+    else:
+        base_url = f"https://{request.host}"
+    
+    referral_link = f"{base_url}/register?ref={user.referral_code}"
+    
+    # Share message for WhatsApp
+    share_message = f"💰 Join Earn'n'Pay Labs and start earning real cash! Complete simple tasks and get paid instantly!\n\n✅ Google Reviews - Earn up to ₦1000\n✅ Ad Clicks - Earn up to ₦1200\n✅ Refer Friends - Earn ₦500 bonus\n\n🎉 Real Testimonials:\n\"I earned N25,000 in my first month!\" - Chidi O. ⭐⭐⭐⭐⭐\n\"The referral bonus is amazing!\" - Ngozi E. ⭐⭐⭐⭐⭐\n\"Finally a legit platform that actually pays!\" - Emeka N. ⭐⭐⭐⭐⭐\n\nJoin thousands of Nigerians already earning!\nSign up: {referral_link}"
+    
+    whatsapp_link = f"https://wa.me/?text={share_message}"
+    
+    return render_template_string(REFERRAL_PAGE,
+        user=user,
+        referral_link=referral_link,
+        referrals=referred_users,
+        total_invites=len(referrals),
+        verified_users=sum(1 for r in referrals if r.verified),
+        downline=downline,
+        whatsapp_link=whatsapp_link
     )
 
 @app.route('/account')
@@ -3090,7 +3194,7 @@ def update_bank():
     if 'username' not in session:
         return redirect('/login')
     
-    user = User.query.get(session['user_id'])
+    user = User.query.get(session('user_id'))
     if not user:
         session.clear()
         return redirect('/login')
@@ -3229,19 +3333,12 @@ def earn():
         flash('❌ Your account has been banned.', 'error')
         return redirect('/login')
     
+    # Reset tasks if needed
+    reset_user_tasks_if_needed(user)
+    
     if user.tier == 'FREE' and user.daily_limit == 0:
         flash('⚠️ You need to upgrade your tier to access tasks!', 'error')
         return redirect('/upgrade')
-    
-    now = datetime.now()
-    if user.last_task_reset:
-        if now - user.last_task_reset >= timedelta(hours=24):
-            user.daily_tasks_completed = 0
-            user.last_task_reset = now
-            db.session.commit()
-    else:
-        user.last_task_reset = now
-        db.session.commit()
     
     tasks = Task.query.filter_by(tier_required=user.tier, is_active=True).all()
     
@@ -3276,16 +3373,12 @@ def complete_task(task_id):
         flash('❌ Your account has been banned.', 'error')
         return redirect('/login')
     
+    # Reset tasks if needed
+    reset_user_tasks_if_needed(user)
+    
     if user.tier == 'FREE' and user.daily_limit == 0:
         flash('⚠️ You need to upgrade your tier to access tasks!', 'error')
         return redirect('/upgrade')
-    
-    now = datetime.now()
-    if user.last_task_reset:
-        if now - user.last_task_reset >= timedelta(hours=24):
-            user.daily_tasks_completed = 0
-            user.last_task_reset = now
-            db.session.commit()
     
     task = Task.query.get_or_404(task_id)
     
@@ -3308,61 +3401,20 @@ def complete_task(task_id):
     
     user.balance += task.reward
     user.trust_score += 1
+    user.daily_tasks_completed += 1
     
+    # Auto-upgrade if trust score reaches threshold
     new_tier = get_tier_from_score(user.trust_score)
     if new_tier != user.tier:
         user.tier = new_tier
         user.daily_limit = TIER_TASKS.get(new_tier, 0)
         flash(f'🎉 Congratulations! You\'ve been upgraded to {new_tier.title()} tier!', 'success')
     
-    user.daily_tasks_completed += 1
     db.session.commit()
     
     log_activity(user.id, 'complete_task', f'Completed task: {task.title}')
     flash(f'✅ Task completed! +₦{task.reward}', 'success')
     return redirect('/earn')
-
-@app.route('/referral')
-def referral_page():
-    if 'username' not in session:
-        return redirect('/login')
-    
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
-        return redirect('/login')
-    
-    if user.is_banned:
-        session.clear()
-        flash('❌ Your account has been banned.', 'error')
-        return redirect('/login')
-    
-    referrals = Referral.query.filter_by(referrer_id=user.id).all()
-    
-    referred_users = []
-    downline = {'FREE': 0, 'BEGINNER': 0, 'EXPERT': 0, 'LEGEND': 0}
-    
-    for ref in referrals:
-        referred = User.query.get(ref.referred_id)
-        if referred:
-            referred_users.append(referred)
-            downline[referred.tier] += 1
-    
-    if request.host.startswith('127.0.0.1') or request.host.startswith('localhost'):
-        base_url = f"http://{request.host}"
-    else:
-        base_url = f"https://{request.host}"
-    
-    referral_link = f"{base_url}/register?ref={user.referral_code}"
-    
-    return render_template_string(REFERRAL_PAGE,
-        user=user,
-        referral_link=referral_link,
-        referrals=referred_users,
-        total_invites=len(referrals),
-        verified_users=sum(1 for r in referrals if r.verified),
-        downline=downline
-    )
 
 @app.route('/upgrade')
 def upgrade_page():
@@ -3782,9 +3834,9 @@ if __name__ == '__main__':
     print("   /login - LOGIN_PAGE")
     print("   /register - REGISTER_PAGE")
     print("   /dashboard - DASHBOARD_PAGE")
-    print("   /earn - EARN_PAGE")
-    print("   /share_task - SHARE_TASK_PAGE")
-    print("   /referral - REFERRAL_PAGE (FIXED!)")
+    print("   /earn - EARN_PAGE (FIXED - Tasks reset every 24hrs)")
+    print("   /share_task - SHARE_TASK_PAGE (WhatsApp share added!)")
+    print("   /referral - REFERRAL_PAGE (FIXED - Shows invites, rewards referrer)")
     print("   /upgrade - UPGRADE_PAGE")
     print("   /withdraw - WITHDRAW_PAGE (5th & 30th)")
     print("   /account - ACCOUNT_PAGE")
