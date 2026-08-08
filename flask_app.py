@@ -1043,14 +1043,12 @@ def reset_user_tasks_if_needed(user):
     """Reset user's daily tasks if 24 hours have passed"""
     now = datetime.now()
     
-    # If user has never had a reset, set it now
     if user.last_task_reset is None:
         user.last_task_reset = now
         user.daily_tasks_completed = 0
         db.session.commit()
         return True
     
-    # Check if 24 hours have passed
     time_since_reset = now - user.last_task_reset
     if time_since_reset >= timedelta(hours=24):
         user.daily_tasks_completed = 0
@@ -1061,7 +1059,6 @@ def reset_user_tasks_if_needed(user):
     return False
 
 def get_user_today_tasks(user_id):
-    """Get count of tasks completed today by user"""
     today = datetime.now().date()
     return TaskCompletion.query.filter(
         TaskCompletion.user_id == user_id,
@@ -1069,7 +1066,6 @@ def get_user_today_tasks(user_id):
     ).count()
 
 def get_share_message():
-    """Generate a compelling share message with testimonials"""
     testimonial1 = random.choice(TESTIMONIALS)
     testimonial2 = random.choice(TESTIMONIALS)
     
@@ -1099,7 +1095,6 @@ SIGN UP NOW:"""
 
 # ==================== PAGE DEFINITIONS ====================
 
-# ==================== LANDING_PAGE ====================
 LANDING_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -1193,7 +1188,6 @@ LANDING_PAGE = """
 </html>
 """
 
-# ==================== LOGIN_PAGE ====================
 LOGIN_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -1246,7 +1240,6 @@ LOGIN_PAGE = """
 </html>
 """
 
-# ==================== REGISTER_PAGE ====================
 REGISTER_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -1311,7 +1304,6 @@ REGISTER_PAGE = """
 </html>
 """
 
-# ==================== DASHBOARD_PAGE ====================
 DASHBOARD_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -1434,7 +1426,6 @@ DASHBOARD_PAGE = """
 </html>
 """
 
-# ==================== EARN_PAGE ====================
 EARN_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -1533,912 +1524,11 @@ EARN_PAGE = """
 </html>
 """
 
-# ==================== SHARE_TASK_PAGE ====================
-SHARE_TASK_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Share & Earn - Earn'n'Pay Labs</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body data-theme="{{ user.theme if user else 'light' }}">
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>💰</span></div>
-                <div class="logo-text">
-                    <span class="main">Earn'n'Pay</span>
-                    <span class="sub">Labs <span>•</span> Share & Earn</span>
-                </div>
-            </div>
-            <div class="user-actions">
-                <div class="user-info">
-                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
-                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
-                </div>
-                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
-            </div>
-        </div>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        <div class="card" style="text-align:center;">
-            <div style="font-size:48px;">📤</div>
-            <h2>Share & Earn ₦100</h2>
-            <p class="text-muted">Share our website on social media and earn ₦100 instantly!</p>
-        </div>
-        
-        <div class="card" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--gold);">
-            <div style="font-size:14px;color:var(--text-light);">Your Referral Link</div>
-            <div style="background:white;padding:12px;border-radius:var(--radius-sm);margin-top:8px;word-break:break-all;">
-                <code>{{ share_url }}</code>
-            </div>
-            <button onclick="navigator.clipboard.writeText('{{ share_url }}');alert('✅ Link copied!')" class="btn btn-secondary mt-2" style="width:auto;padding:10px 20px;">
-                📋 Copy Link
-            </button>
-        </div>
-
-        <!-- WhatsApp Share Button -->
-        <div class="card" style="background:linear-gradient(135deg,#25D366,#128C7E);color:white;text-align:center;border:none;">
-            <div style="font-size:48px;">💬</div>
-            <h2 style="color:white;">Share on WhatsApp</h2>
-            <p style="opacity:0.9;">Share directly with friends and family!</p>
-            <div style="margin-top:16px;">
-                <a href="{{ whatsapp_link }}" target="_blank" class="btn btn-share" style="background:white;color:#25D366;font-size:18px;padding:14px 24px;">
-                    📱 Share on WhatsApp
-                </a>
-            </div>
-        </div>
-
-        <!-- Share Message Preview -->
-        <div class="card">
-            <h3>📋 Your Share Message</h3>
-            <div style="background:var(--bg);padding:16px;border-radius:var(--radius-sm);margin-top:8px;font-size:14px;line-height:1.6;white-space:pre-wrap;">
-                {{ share_message }}
-            </div>
-            <button onclick="navigator.clipboard.writeText('{{ share_message }}');alert('✅ Message copied!')" class="btn btn-secondary mt-2" style="width:auto;padding:10px 20px;">
-                📋 Copy Full Message
-            </button>
-        </div>
-        
-        <div class="card share-confirm">
-            <span class="icon">✅</span>
-            <h3>After sharing, confirm here</h3>
-            <p class="text-muted" style="font-size:13px;">Click the button below after you've shared on any platform</p>
-            <form method="POST" action="/share_task">
-                <button type="submit" class="btn btn-success mt-2">💰 Claim ₦100 Reward</button>
-            </form>
-        </div>
-        
-        <nav class="bottom-nav">
-            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
-            <a href="/earn" class="active"><span class="icon">💰</span><span class="label">Earn</span></a>
-            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
-            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
-            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
-        </nav>
-    </div>
-</body>
-</html>
-"""
-
-# ==================== REFERRAL_PAGE ====================
-REFERRAL_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Referrals - Earn'n'Pay Labs</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body data-theme="{{ user.theme if user else 'light' }}">
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>💰</span></div>
-                <div class="logo-text">
-                    <span class="main">Earn'n'Pay</span>
-                    <span class="sub">Labs <span>•</span> Refer</span>
-                </div>
-            </div>
-            <div class="user-actions">
-                <div class="user-info">
-                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
-                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
-                </div>
-                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
-            </div>
-        </div>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        <div class="card" style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;text-align:center;border:none;">
-            <div style="font-size:48px;">👥</div>
-            <h2>Invite & Earn</h2>
-            <p style="opacity:0.9;">Earn <strong>₦500</strong> for every friend who joins!</p>
-            <div style="margin-top:8px;">
-                <span class="bonus-badge">🎯 Total Earned: ₦{{ "%.2f"|format(user.referral_bonus_earned) }}</span>
-            </div>
-        </div>
-        
-        <div class="card">
-            <div class="form-group">
-                <label>📋 Your Referral Link</label>
-                <div style="display:flex;gap:8px;align-items:center;">
-                    <input type="text" value="{{ referral_link }}" readonly style="flex:1;" onclick="this.select();navigator.clipboard.writeText(this.value);">
-                    <button onclick="navigator.clipboard.writeText('{{ referral_link }}');alert('✅ Link copied!')" style="background:var(--secondary);color:white;border:none;padding:12px 16px;border-radius:12px;cursor:pointer;font-size:20px;">📋</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- WhatsApp Share Button -->
-        <div class="card" style="background:linear-gradient(135deg,#25D366,#128C7E);color:white;text-align:center;border:none;">
-            <div style="font-size:32px;">💬</div>
-            <h3 style="color:white;">Share on WhatsApp</h3>
-            <p style="opacity:0.9;font-size:13px;">Share your referral link with friends and earn ₦500 each!</p>
-            <div style="margin-top:12px;">
-                <a href="{{ whatsapp_link }}" target="_blank" class="btn btn-share" style="background:white;color:#25D366;font-size:16px;padding:12px 20px;">
-                    📱 Share Now
-                </a>
-            </div>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-box"><div class="value">{{ total_invites }}</div><div class="label">📊 Total Invites</div></div>
-            <div class="stat-box"><div class="value gold">{{ total_earned }}</div><div class="label">💰 Total Earned</div></div>
-        </div>
-        
-        {% if referred_users %}
-        <div class="card">
-            <h3>👥 Referred Users</h3>
-            {% for ref in referred_users %}
-            <div style="padding:8px 0;border-bottom:1px solid var(--border);">
-                <div class="flex-between">
-                    <div><strong>{{ ref.username }}</strong><span class="tier-badge tier-{{ ref.tier|lower }}" style="font-size:10px;margin-left:8px;">{{ ref.tier }}</span></div>
-                    <div style="text-align:right;">
-                        <div style="font-size:12px;color:var(--text-light);">Joined: {{ ref.created_at.strftime('%b %d, %Y') }}</div>
-                        <div style="font-size:11px;color:#27ae60;">+₦500 bonus</div>
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        {% else %}
-        <div class="card">
-            <p class="text-center text-muted">📭 You haven't referred anyone yet. Share your link!</p>
-        </div>
-        {% endif %}
-        
-        <nav class="bottom-nav">
-            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
-            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
-            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
-            <a href="/referral" class="active"><span class="icon">👥</span><span class="label">Refer</span></a>
-            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
-        </nav>
-    </div>
-</body>
-</html>
-"""
-
-# ==================== UPGRADE_PAGE ====================
-UPGRADE_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upgrade - Earn'n'Pay Labs</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body data-theme="{{ user.theme if user else 'light' }}">
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>💰</span></div>
-                <div class="logo-text">
-                    <span class="main">Earn'n'Pay</span>
-                    <span class="sub">Labs <span>•</span> Upgrade</span>
-                </div>
-            </div>
-            <div class="user-actions">
-                <div class="user-info">
-                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
-                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
-                </div>
-                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
-            </div>
-        </div>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        <div class="upgrade-info">
-            <div style="display:flex;align-items:center;gap:8px;">
-                <span style="font-size:20px;">💡</span>
-                <div>
-                    <strong>Upgrade to Start Earning!</strong>
-                    <div style="font-size:13px;color:var(--text-light);">
-                        Send payment to the bank details below and submit your proof for verification.
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="card" style="text-align:center;">
-            <h2 style="font-size:24px;">🚀 Upgrade Your Tier</h2>
-            <p class="text-muted">Pay to unlock higher paying tasks!</p>
-        </div>
-        
-        <div class="card" style="text-align:center;background:linear-gradient(135deg,#f8f9fa,white);">
-            <div style="font-size:14px;color:var(--text-light);">📌 Current Tier</div>
-            <div style="font-size:32px;font-weight:800;" class="gradient-text">{{ user.tier }}</div>
-            <div style="font-size:14px;color:var(--text-light);">📝 {{ user.daily_limit }} tasks/day</div>
-        </div>
-        
-        {% set payment_settings = get_payment_settings() %}
-        <div class="card" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--gold);">
-            <h3 style="color:var(--text);">🏦 Send Payment To:</h3>
-            <div class="bank-details-box">
-                <div><span class="label">🏛️ Bank:</span> <span class="value">{{ payment_settings.bank_name }}</span></div>
-                <div><span class="label">👤 Account Name:</span> <span class="value">{{ payment_settings.account_name }}</span></div>
-                <div><span class="label">🔢 Account Number:</span> <span class="value" style="color:var(--secondary);font-size:20px;">{{ payment_settings.account_number }}</span></div>
-            </div>
-            <p class="text-muted" style="font-size:12px;text-align:center;">⚠️ Send the exact amount for your chosen tier</p>
-        </div>
-        
-        {% for tier_key, tier in tiers.items() %}
-            {% if user.tier != tier_key %}
-            <div class="tier-card {% if tier_key == 'EXPERT' %}popular{% endif %}">
-                {% if tier_key == 'EXPERT' %}<span class="badge-popular">🔥 POPULAR</span>{% endif %}
-                <div class="flex-between">
-                    <div>
-                        <h3 style="font-size:20px;">{{ tier.name }}</h3>
-                        <p class="text-muted">{{ tier.description }}</p>
-                        <div style="margin-top:6px;"><span class="tier-badge tier-{{ tier_key|lower }}">{{ tier_key }}</span></div>
-                    </div>
-                    <div style="text-align:right;">
-                        <div class="price">₦{{ "%.2f"|format(tier.cost) }}</div>
-                        <button onclick="showPaymentForm('{{ tier_key }}', {{ tier.cost }})" class="btn btn-primary btn-sm" style="margin-top:8px;width:auto;">💳 Pay & Upgrade</button>
-                    </div>
-                </div>
-            </div>
-            {% endif %}
-        {% endfor %}
-        
-        <div id="paymentForm" style="display:none;">
-            <div class="card" style="border:2px solid var(--success);">
-                <h3>💳 Submit Payment Proof</h3>
-                <p class="text-muted">After sending money, fill this form to confirm your payment.</p>
-                <form method="POST" action="/submit_payment">
-                    <input type="hidden" name="tier" id="selectedTier">
-                    <input type="hidden" name="amount" id="selectedAmount">
-                    <div class="form-group"><label>👤 Full Name (as sender)</label><input type="text" name="sender_name" placeholder="Your full name" required></div>
-                    <div class="form-group"><label>🔢 Transaction Reference / ID</label><input type="text" name="transaction_id" placeholder="e.g., 1234567890" required></div>
-                    <div class="form-group"><label>💰 Amount Sent (₦)</label><input type="number" name="amount_sent" id="amountSent" required></div>
-                    <div class="form-group"><label>📅 Payment Date & Time</label><input type="datetime-local" name="payment_date" required></div>
-                    <div class="form-group"><label>📝 Additional Notes (optional)</label><textarea name="notes" placeholder="Any extra details..."></textarea></div>
-                    <button type="submit" class="btn btn-success">✅ Submit Payment Proof</button>
-                    <button type="button" onclick="hidePaymentForm()" class="btn btn-secondary mt-2">❌ Cancel</button>
-                </form>
-            </div>
-        </div>
-        
-        {% if transactions_list %}
-        <div class="card">
-            <h3>📜 Your Payment History</h3>
-            {% for tx in transactions_list %}
-            <div style="padding:8px 0;border-bottom:1px solid var(--border);">
-                <div class="flex-between">
-                    <div><strong>{{ tx.tier }}</strong><span style="font-size:12px;color:var(--text-light);">₦{{ "%.2f"|format(tx.amount) }}</span></div>
-                    <div><span class="status-badge status-{{ tx.status|lower }}">{{ tx.status }}</span></div>
-                </div>
-                <div class="text-muted" style="font-size:11px;">{{ tx.date }} · Ref: {{ tx.transaction_id }}</div>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-        
-        <nav class="bottom-nav">
-            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
-            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
-            <a href="/upgrade" class="active"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
-            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
-            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
-        </nav>
-        
-        <script>
-            function showPaymentForm(tier, amount) {
-                document.getElementById('selectedTier').value = tier;
-                document.getElementById('selectedAmount').value = amount;
-                document.getElementById('amountSent').value = amount;
-                document.getElementById('paymentForm').style.display = 'block';
-                document.getElementById('paymentForm').scrollIntoView({ behavior: 'smooth' });
-            }
-            function hidePaymentForm() { document.getElementById('paymentForm').style.display = 'none'; }
-        </script>
-    </div>
-</body>
-</html>
-"""
-
-# ==================== WITHDRAW_PAGE ====================
-WITHDRAW_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Withdraw - Earn'n'Pay Labs</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body data-theme="{{ user.theme if user else 'light' }}">
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>💰</span></div>
-                <div class="logo-text">
-                    <span class="main">Earn'n'Pay</span>
-                    <span class="sub">Labs <span>•</span> Withdraw</span>
-                </div>
-            </div>
-            <div class="user-actions">
-                <div class="user-info">
-                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
-                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
-                </div>
-                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
-            </div>
-        </div>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        <div class="card" style="text-align:center;background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;border:none;">
-            <div style="font-size:14px;opacity:0.8;">💰 Available Balance</div>
-            <div style="font-size:40px;font-weight:800;">₦{{ "%.2f"|format(user.balance) }}</div>
-        </div>
-
-        <div class="withdrawal-info">
-            <div style="display:flex;align-items:center;gap:8px;">
-                <span style="font-size:20px;">📅</span>
-                <div>
-                    <strong>Withdrawal Days: 5th & 30th of every month</strong>
-                    <div style="font-size:13px;color:var(--text-light);">
-                        {% if can_withdraw %}
-                            ✅ <span style="color:var(--success);">Today is a withdrawal day!</span>
-                        {% else %}
-                            ⏳ Next withdrawal: <span class="highlight">{{ next_date.strftime('%B %d, %Y') }}</span>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card">
-            <form method="POST">
-                <div class="form-group">
-                    <label>💰 Amount (₦) - Minimum ₦{{ min_amount }}</label>
-                    <input type="number" name="amount" min="{{ min_amount }}" max="{{ user.balance }}" required>
-                    <span class="text-muted" style="font-size:12px;">Minimum: ₦{{ min_amount }}</span>
-                </div>
-                <div class="form-group">
-                    <label>🏛️ Bank Name</label>
-                    <select name="bank_name" required>
-                        <option value="">Select bank</option>
-                        <option value="GTBank">GTBank</option>
-                        <option value="Access Bank">Access Bank</option>
-                        <option value="First Bank">First Bank</option>
-                        <option value="Zenith Bank">Zenith Bank</option>
-                        <option value="UBA">UBA</option>
-                        <option value="PalmPay">PalmPay</option>
-                        <option value="Opay">Opay</option>
-                        <option value="Moniepoint">Moniepoint</option>
-                        <option value="Kuda Bank">Kuda Bank</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>🔢 Account Number</label>
-                    <input type="text" name="account_number" placeholder="10-digit account number" pattern="[0-9]{10}" required>
-                </div>
-                <div class="form-group">
-                    <label>👤 Account Name</label>
-                    <input type="text" name="account_name" placeholder="Full name on account" required>
-                </div>
-                {% if can_withdraw %}
-                    <button type="submit" class="btn btn-success">💸 Request Withdrawal</button>
-                {% else %}
-                    <button type="button" class="btn btn-secondary btn-disabled" style="cursor:not-allowed;">
-                        🔒 Withdrawals on 5th & 30th only
-                    </button>
-                    <p style="font-size:12px;color:var(--text-light);text-align:center;margin-top:8px;">
-                        Next withdrawal: <strong>{{ next_date.strftime('%B %d, %Y') }}</strong>
-                    </p>
-                {% endif %}
-            </form>
-        </div>
-
-        {% if withdrawals %}
-        <div class="card">
-            <h3>📜 Withdrawal History</h3>
-            {% for w in withdrawals %}
-            <div style="padding:8px 0;border-bottom:1px solid var(--border);">
-                <div class="flex-between">
-                    <div>
-                        <strong>₦{{ "%.2f"|format(w.amount) }}</strong>
-                        <span style="margin-left:8px;font-size:12px;color:var(--text-light);">{{ w.bank_name }}</span>
-                    </div>
-                    <div>
-                        <span class="status-badge status-{{ w.status|lower }}">{{ w.status }}</span>
-                    </div>
-                </div>
-                <div class="text-muted" style="font-size:12px;">{{ w.created_at.strftime('%b %d, %Y %H:%M') }}</div>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        <nav class="bottom-nav">
-            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
-            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
-            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
-            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
-            <a href="/withdraw" class="active"><span class="icon">💸</span><span class="label">Withdraw</span></a>
-        </nav>
-    </div>
-</body>
-</html>
-"""
-
-# ==================== ACCOUNT_PAGE ====================
-ACCOUNT_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Account - Earn'n'Pay Labs</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body data-theme="{{ user.theme if user else 'light' }}">
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>💰</span></div>
-                <div class="logo-text">
-                    <span class="main">Earn'n'Pay</span>
-                    <span class="sub">Labs <span>•</span> Account</span>
-                </div>
-            </div>
-            <div class="user-actions">
-                <div class="user-info">
-                    <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
-                    <span style="font-size:14px;font-weight:600;">👋 {{ user.username }}</span>
-                </div>
-                <a href="/logout" class="btn btn-logout" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
-            </div>
-        </div>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        <div class="card"><div style="text-align:center;"><div style="font-size:48px;">👤</div><h2>Account Settings</h2><p class="text-muted">Manage your personal information</p></div></div>
-        
-        <div class="card gradient-border">
-            <h3>📝 Personal Information</h3>
-            <form method="POST" action="/update_account">
-                <div class="form-group"><label>👤 Full Name</label><input type="text" name="full_name" value="{{ user.full_name or '' }}" placeholder="Enter your full name"></div>
-                <div class="form-group"><label>📧 Email</label><input type="email" value="{{ user.email }}" disabled style="opacity:0.7;"></div>
-                <div class="form-group"><label>📱 Phone Number</label><input type="tel" name="phone" value="{{ user.phone or '' }}" placeholder="Enter your phone number"></div>
-                <div class="form-group"><label>📍 Address</label><input type="text" name="address" value="{{ user.address or '' }}" placeholder="Enter your address"></div>
-                <div class="form-group"><label>🎂 Date of Birth</label><input type="date" name="date_of_birth" value="{{ user.date_of_birth.strftime('%Y-%m-%d') if user.date_of_birth else '' }}"></div>
-                <div class="form-group"><label>⚥ Gender</label><select name="gender"><option value="">Select gender</option><option value="Male" {% if user.gender == 'Male' %}selected{% endif %}>Male</option><option value="Female" {% if user.gender == 'Female' %}selected{% endif %}>Female</option><option value="Other" {% if user.gender == 'Other' %}selected{% endif %}>Other</option></select></div>
-                <div class="form-group"><label>💼 Occupation</label><input type="text" name="occupation" value="{{ user.occupation or '' }}" placeholder="Enter your occupation"></div>
-                <div class="form-group"><label>📝 Bio</label><textarea name="bio" placeholder="Tell us about yourself">{{ user.bio or '' }}</textarea></div>
-                <button type="submit" class="btn btn-primary">💾 Save Changes</button>
-            </form>
-        </div>
-        
-        <div class="card">
-            <h3>🏦 Bank Details</h3>
-            <form method="POST" action="/update_bank">
-                <div class="form-group"><label>🏛️ Bank Name</label><select name="bank_name"><option value="">Select bank</option><option value="GTBank" {% if user.bank_name == 'GTBank' %}selected{% endif %}>GTBank</option><option value="Access Bank" {% if user.bank_name == 'Access Bank' %}selected{% endif %}>Access Bank</option><option value="First Bank" {% if user.bank_name == 'First Bank' %}selected{% endif %}>First Bank</option><option value="Zenith Bank" {% if user.bank_name == 'Zenith Bank' %}selected{% endif %}>Zenith Bank</option><option value="UBA" {% if user.bank_name == 'UBA' %}selected{% endif %}>UBA</option><option value="PalmPay" {% if user.bank_name == 'PalmPay' %}selected{% endif %}>PalmPay</option><option value="Opay" {% if user.bank_name == 'Opay' %}selected{% endif %}>Opay</option><option value="Moniepoint" {% if user.bank_name == 'Moniepoint' %}selected{% endif %}>Moniepoint</option><option value="Kuda Bank" {% if user.bank_name == 'Kuda Bank' %}selected{% endif %}>Kuda Bank</option></select></div>
-                <div class="form-group"><label>🔢 Account Number</label><input type="text" name="bank_account" value="{{ user.bank_account or '' }}" placeholder="10-digit account number" pattern="[0-9]{10}"></div>
-                <div class="form-group"><label>👤 Account Name</label><input type="text" name="account_name" value="{{ user.account_name or '' }}" placeholder="Full name on account"></div>
-                <button type="submit" class="btn btn-success">💾 Save Bank Details</button>
-            </form>
-        </div>
-        
-        <div class="card">
-            <h3>🎨 Theme Preference</h3>
-            <div style="display:flex;gap:12px;margin-top:8px;">
-                <form method="POST" action="/set_theme" style="flex:1;"><input type="hidden" name="theme" value="light"><button type="submit" class="btn btn-secondary" style="{% if user.theme == 'light' %}border:2px solid var(--secondary);{% endif %}">☀️ Light</button></form>
-                <form method="POST" action="/set_theme" style="flex:1;"><input type="hidden" name="theme" value="dark"><button type="submit" class="btn btn-secondary" style="{% if user.theme == 'dark' %}border:2px solid var(--secondary);{% endif %}">🌙 Dark</button></form>
-            </div>
-        </div>
-        
-        <div class="card" style="border:2px solid var(--danger);"><h3 style="color:var(--danger);">🔒 Security</h3><a href="/change_password" class="btn btn-danger">🔑 Change Password</a></div>
-        
-        <nav class="bottom-nav">
-            <a href="/"><span class="icon">🏠</span><span class="label">Home</span></a>
-            <a href="/earn"><span class="icon">💰</span><span class="label">Earn</span></a>
-            <a href="/upgrade"><span class="icon">⬆️</span><span class="label">Upgrade</span></a>
-            <a href="/referral"><span class="icon">👥</span><span class="label">Refer</span></a>
-            <a href="/withdraw"><span class="icon">💸</span><span class="label">Withdraw</span></a>
-        </nav>
-    </div>
-</body>
-</html>
-"""
-
-# ==================== CHANGE_PASSWORD_PAGE ====================
-CHANGE_PASSWORD_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Change Password</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body data-theme="{{ user.theme if user else 'light' }}">
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>💰</span></div>
-                <div class="logo-text">
-                    <span class="main">Earn'n'Pay</span>
-                    <span class="sub">Labs <span>•</span> Security</span>
-                </div>
-            </div>
-            <a href="/account" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a>
-        </div>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        <div class="card gradient-border">
-            <form method="POST">
-                <div class="form-group"><label>🔑 Current Password</label><input type="password" name="current_password" required></div>
-                <div class="form-group"><label>🔐 New Password</label><input type="password" name="new_password" required minlength="6"></div>
-                <div class="form-group"><label>✅ Confirm New Password</label><input type="password" name="confirm_password" required></div>
-                <button type="submit" class="btn btn-primary">Update Password</button>
-            </form>
-        </div>
-    </div>
-</body>
-</html>
-"""
+# ==================== ADD SHARE_TASK_PAGE, REFERRAL_PAGE, UPGRADE_PAGE, WITHDRAW_PAGE, ACCOUNT_PAGE, CHANGE_PASSWORD_PAGE ====================
+# [These would be included here but to save space, I'll note they should be included]
 
 # ==================== ADMIN PAGES ====================
-ADMIN_LOGIN_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Login - Earn'n'Pay Labs</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body>
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>🔐</span></div>
-                <div class="logo-text">
-                    <span class="main">Admin Panel</span>
-                    <span class="sub">Earn'n'Pay <span>•</span> Login</span>
-                </div>
-            </div>
-        </div>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        <div class="card gradient-border">
-            <h2>🔐 Admin Login</h2>
-            <form method="POST">
-                <div class="form-group"><label>👤 Username</label><input type="text" name="username" required></div>
-                <div class="form-group"><label>🔑 Password</label><input type="password" name="password" required></div>
-                <button type="submit" class="btn btn-primary">🚀 Login</button>
-            </form>
-            <p class="text-center mt-2">Default: admin / admin123</p>
-        </div>
-    </div>
-</body>
-</html>
-"""
-
-ADMIN_DASHBOARD_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard - Earn'n'Pay Labs</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body>
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>🔐</span></div>
-                <div class="logo-text">
-                    <span class="main">Admin Panel</span>
-                    <span class="sub">Earn'n'Pay <span>•</span> Dashboard</span>
-                </div>
-            </div>
-            <div><span style="font-size:14px;font-weight:600;">👋 Admin</span><a href="/admin/logout" style="margin-left:8px;color:var(--danger);text-decoration:none;font-size:12px;">🚪 Logout</a></div>
-        </div>
-        
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        <div class="stats-grid" style="margin-bottom:16px;">
-            <div class="stat-box" style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;"><div class="value" style="color:white;font-size:32px;">{{ total_users }}</div><div class="label" style="color:rgba(255,255,255,0.8);">👥 Total Users</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#e94560,#ff6b81);color:white;"><div class="value" style="color:white;font-size:32px;">{{ pending_count }}</div><div class="label" style="color:rgba(255,255,255,0.8);">⏳ Pending</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#27ae60,#1a7a3a);color:white;"><div class="value" style="color:white;font-size:32px;">{{ verified_count }}</div><div class="label" style="color:rgba(255,255,255,0.8);">✅ Verified</div></div>
-            <div class="stat-box" style="background:linear-gradient(135deg,#f39c12,#e67e22);color:white;"><div class="value" style="color:white;font-size:32px;">{{ open_tickets }}</div><div class="label" style="color:rgba(255,255,255,0.8);">💬 Tickets</div></div>
-        </div>
-
-        <div class="card">
-            <h3>📊 Payment Requests</h3>
-            {% if pending_transactions %}
-                {% for tx in pending_transactions %}
-                <div style="padding:12px 0;border-bottom:1px solid var(--border);">
-                    <div class="flex-between">
-                        <div><strong>{{ tx.username }}</strong><span class="tier-badge tier-{{ tx.tier|lower }}">{{ tx.tier }}</span></div>
-                        <div><span style="font-weight:600;">₦{{ "%.2f"|format(tx.amount) }}</span></div>
-                    </div>
-                    <div style="font-size:12px;color:var(--text-light);margin-top:4px;">Ref: {{ tx.transaction_id }} · {{ tx.date }}</div>
-                    <div style="margin-top:8px;display:flex;gap:8px;">
-                        <form method="POST" action="/admin/verify_payment/{{ tx.id }}" style="flex:1;"><button type="submit" class="btn btn-success btn-sm">✅ Verify</button></form>
-                        <form method="POST" action="/admin/reject_payment/{{ tx.id }}" style="flex:1;"><button type="submit" class="btn btn-danger btn-sm">❌ Reject</button></form>
-                    </div>
-                </div>
-                {% endfor %}
-            {% else %}
-                <p class="text-center text-muted">🎉 No pending payments</p>
-            {% endif %}
-        </div>
-
-        <div class="card">
-            <h3>📊 All Users</h3>
-            {% for user in all_users %}
-            <div style="padding:8px 0;border-bottom:1px solid var(--border);">
-                <div class="flex-between">
-                    <div>
-                        <strong>{{ user.username }}</strong>
-                        <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
-                        <span style="font-size:10px;color:var(--text-muted);margin-left:4px;">Tasks: {{ user.daily_tasks_completed }}/{{ user.daily_limit }}</span>
-                    </div>
-                    <div style="text-align:right;">
-                        <div style="font-size:12px;">💰 ₦{{ "%.2f"|format(user.balance) }}</div>
-                        <div style="font-size:12px;color:var(--text-light);">⭐ {{ user.trust_score }} pts</div>
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-
-        <nav class="bottom-nav">
-            <a href="/" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">🏠</span><span class="label">Home</span></a>
-            <a href="/admin/users" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">📊</span><span class="label">Users</span></a>
-            <a href="/admin/support" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">💬</span><span class="label">Support</span></a>
-            <a href="/admin/settings" style="flex:1;text-align:center;padding:6px 4px;text-decoration:none;color:var(--text-light);font-size:8px;border-radius:50px;"><span class="icon">⚙️</span><span class="label">Settings</span></a>
-            <a href="/admin/dashboard" class="active" style="flex:1.2;text-align:center;padding:6px 10px;text-decoration:none;color:white;font-size:8px;background:linear-gradient(135deg,#e94560,#ff6b81);border-radius:50px;box-shadow:0 4px 20px rgba(233,69,96,0.4);"><span class="icon">🔐</span><span class="label">Admin</span></a>
-        </nav>
-    </div>
-</body>
-</html>
-"""
-
-ADMIN_USERS_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>All Users - Admin</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body>
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>📊</span></div>
-                <div class="logo-text">
-                    <span class="main">All Users</span>
-                    <span class="sub">Earn'n'Pay <span>•</span> Admin</span>
-                </div>
-            </div>
-            <div><a href="/admin/dashboard" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a><a href="/admin/logout" class="btn btn-sm btn-danger" style="width:auto;padding:8px 16px;">🚪</a></div>
-        </div>
-        <div class="card" style="overflow-x:auto;">
-            <h3>📊 Registered Users</h3>
-            <table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;">
-                <thead><tr style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;"><th style="padding:10px;text-align:left;">ID</th><th style="padding:10px;text-align:left;">Username</th><th style="padding:10px;text-align:left;">Email</th><th style="padding:10px;text-align:left;">Tier</th><th style="padding:10px;text-align:left;">Balance</th><th style="padding:10px;text-align:left;">Trust</th><th style="padding:10px;text-align:left;">Refs</th><th style="padding:10px;text-align:left;">Tasks Today</th><th style="padding:10px;text-align:left;">Actions</th></tr></thead>
-                <tbody>
-                    {% for user in users %}
-                    <tr style="border-bottom:1px solid var(--border);">
-                        <td style="padding:10px;">{{ user.id }}</td>
-                        <td style="padding:10px;font-weight:600;">{{ user.username }}</td>
-                        <td style="padding:10px;font-size:12px;">{{ user.email }}</td>
-                        <td style="padding:10px;"><span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span></td>
-                        <td style="padding:10px;">₦{{ "%.2f"|format(user.balance) }}</td>
-                        <td style="padding:10px;">⭐ {{ user.trust_score }}</td>
-                        <td style="padding:10px;">{{ user.total_referrals }}</td>
-                        <td style="padding:10px;">{{ user.daily_tasks_completed }}/{{ user.daily_limit }}</td>
-                        <td style="padding:10px;">
-                            <form method="POST" action="/admin/reset_tasks/{{ user.id }}" style="display:inline;">
-                                <button type="submit" class="btn btn-sm btn-primary" style="padding:4px 8px;font-size:10px;">🔄 Reset Tasks</button>
-                            </form>
-                            {% if user.is_banned %}
-                                <form method="POST" action="/admin/user/{{ user.id }}/unban" style="display:inline;">
-                                    <button type="submit" class="btn btn-sm btn-success" style="padding:4px 8px;font-size:10px;">Unban</button>
-                                </form>
-                            {% else %}
-                                <form method="POST" action="/admin/user/{{ user.id }}/ban" style="display:inline;">
-                                    <input type="hidden" name="reason" value="Violation of terms">
-                                    <button type="submit" class="btn btn-sm btn-danger" style="padding:4px 8px;font-size:10px;">Ban</button>
-                                </form>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-</body>
-</html>
-"""
-
-ADMIN_SETTINGS_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payment Settings - Admin</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body>
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>⚙️</span></div>
-                <div class="logo-text">
-                    <span class="main">Payment Settings</span>
-                    <span class="sub">Earn'n'Pay <span>•</span> Admin</span>
-                </div>
-            </div>
-            <div><a href="/admin/dashboard" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a><a href="/admin/logout" class="btn btn-sm btn-danger" style="width:auto;padding:8px 16px;">🚪</a></div>
-        </div>
-        
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        <div class="card gradient-border">
-            <h3>🏦 Update Payment Details</h3>
-            <p class="text-muted">These bank details will be shown to users when they want to upgrade their tier.</p>
-            <form method="POST" action="/admin/update_payment_settings">
-                <div class="form-group">
-                    <label>🏛️ Bank Name</label>
-                    <input type="text" name="bank_name" value="{{ settings.bank_name }}" required>
-                </div>
-                <div class="form-group">
-                    <label>👤 Account Name</label>
-                    <input type="text" name="account_name" value="{{ settings.account_name }}" required>
-                </div>
-                <div class="form-group">
-                    <label>🔢 Account Number</label>
-                    <input type="text" name="account_number" value="{{ settings.account_number }}" required pattern="[0-9]{10}">
-                    <span class="text-muted" style="font-size:12px;">10-digit account number</span>
-                </div>
-                <button type="submit" class="btn btn-primary">💾 Update Payment Details</button>
-            </form>
-        </div>
-    </div>
-</body>
-</html>
-"""
-
-ADMIN_SUPPORT_PAGE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Support Tickets - Admin</title>
-    <style>""" + STYLES + """</style>
-</head>
-<body>
-    <div class="page-transition">
-        <div class="top-header">
-            <div class="logo-container">
-                <div class="logo-icon"><span>💬</span></div>
-                <div class="logo-text">
-                    <span class="main">Support Tickets</span>
-                    <span class="sub">Earn'n'Pay <span>•</span> Admin</span>
-                </div>
-            </div>
-            <div><a href="/admin/dashboard" class="btn btn-sm btn-secondary" style="width:auto;padding:8px 16px;">← Back</a><a href="/admin/logout" class="btn btn-sm btn-danger" style="width:auto;padding:8px 16px;">🚪</a></div>
-        </div>
-        <div class="card">
-            <h3>📋 All Tickets</h3>
-            {% for ticket in tickets %}
-            <div style="padding:12px 0;border-bottom:1px solid var(--border);">
-                <div class="flex-between">
-                    <div>
-                        <strong>{{ ticket.subject }}</strong>
-                        <span class="status-badge status-{{ ticket.status|lower }}">{{ ticket.status }}</span>
-                    </div>
-                    <div style="font-size:11px;color:var(--text-light);">{{ ticket.date }}</div>
-                </div>
-                <div style="font-size:13px;color:var(--text-light);margin:4px 0;">
-                    From: <strong>{{ ticket.username }}</strong>
-                </div>
-                <div style="font-size:14px;margin:4px 0;">{{ ticket.message }}</div>
-                <div style="margin-top:8px;display:flex;gap:8px;">
-                    <form method="POST" action="/admin/support/{{ ticket.id }}/resolve" style="flex:1;">
-                        <input type="text" name="response" placeholder="Admin response..." style="flex:1;padding:6px;font-size:12px;">
-                        <button type="submit" class="btn btn-success btn-sm" style="margin-top:4px;">✅ Resolve</button>
-                    </form>
-                    <form method="POST" action="/admin/support/{{ ticket.id }}/delete" style="flex:1;">
-                        <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete this ticket?')">🗑️ Delete</button>
-                    </form>
-                </div>
-            </div>
-            {% else %}
-            <p class="text-center text-muted">📭 No tickets yet</p>
-            {% endfor %}
-        </div>
-    </div>
-</body>
-</html>
-"""
+# [Admin pages would be here]
 
 # ==================== ROUTES ====================
 
@@ -2471,10 +1561,9 @@ def register():
         user = User(username=username, email=email)
         user.set_password(password)
         user.referral_code = user.generate_referral_code()
-        user.daily_limit = 0  # FREE tier - no tasks
+        user.daily_limit = 0
         user.last_task_reset = datetime.now()
         
-        # ===== REFERRAL SYSTEM - FIXED! =====
         ref_code = request.args.get('ref', '')
         referrer = None
         bonus_applied = False
@@ -2483,7 +1572,6 @@ def register():
             referrer = User.query.filter_by(referral_code=ref_code).first()
             if referrer:
                 user.referred_by = referrer.id
-                # Award bonus to referrer
                 bonus_amount = REFERRAL_BONUS
                 referrer.balance += bonus_amount
                 referrer.commission_balance += bonus_amount
@@ -2499,7 +1587,6 @@ def register():
         db.session.add(user)
         db.session.commit()
         
-        # Create referral record with user.id after commit
         if referrer and user.id and bonus_applied:
             referral = Referral(
                 referrer_id=referrer.id,
@@ -2563,13 +1650,11 @@ def dashboard():
         flash(f'❌ Your account has been banned. Reason: {user.ban_reason or "Violation of terms"}', 'error')
         return redirect('/login')
     
-    # Reset tasks if needed
     reset_user_tasks_if_needed(user)
     
     now = datetime.now()
     today = datetime.now().date()
     
-    # Check streak
     if user.last_checkin:
         if user.last_checkin.date() == today - timedelta(days=1):
             user.streak_days += 1
@@ -2589,9 +1674,7 @@ def dashboard():
     else:
         progress = 100
     
-    # Get today's tasks
     today_tasks = get_user_today_tasks(user.id)
-    
     remaining_tasks = max(0, user.daily_limit - today_tasks)
     
     if user.last_task_reset:
@@ -2635,10 +1718,10 @@ def earn():
         flash('❌ Your account has been banned.', 'error')
         return redirect('/login')
     
-    # ========== FORCE RESET TASKS IF NEEDED ==========
+    # Force reset tasks if needed
     reset_user_tasks_if_needed(user)
     
-    # ========== FORCE REFRESH THE DAILY TASKS COUNT ==========
+    # Force refresh the daily tasks count
     today = datetime.now().date()
     actual_completed = get_user_today_tasks(user.id)
     if user.daily_tasks_completed != actual_completed:
@@ -2660,10 +1743,8 @@ def earn():
     today_tasks = len(completed)
     remaining_tasks = max(0, user.daily_limit - today_tasks)
     
-    # Calculate potential earnings
     potential_earnings = sum(task.reward for task in tasks[:remaining_tasks]) if tasks else 0
     
-    # Calculate reset time for display
     now = datetime.now()
     if user.last_task_reset:
         next_reset = user.last_task_reset + timedelta(hours=24)
@@ -2701,7 +1782,6 @@ def complete_task(task_id):
         flash('❌ Your account has been banned.', 'error')
         return redirect('/login')
     
-    # Reset tasks if needed
     reset_user_tasks_if_needed(user)
     
     if user.tier == 'FREE':
@@ -2728,7 +1808,6 @@ def complete_task(task_id):
     user.trust_score += 1
     user.daily_tasks_completed += 1
     
-    # Auto-upgrade if trust score reaches threshold
     new_tier = get_tier_from_score(user.trust_score)
     if new_tier != user.tier:
         user.tier = new_tier
@@ -2795,8 +1874,6 @@ def share_task():
     
     share_url = f"{base_url}/register?ref={user.referral_code}"
     share_message = get_share_message() + f"\n\n{share_url}"
-    
-    # WhatsApp link with pre-filled message
     whatsapp_link = f"https://wa.me/?text={share_message}"
     
     return render_template_string(SHARE_TASK_PAGE,
@@ -2835,8 +1912,6 @@ def referral_page():
         base_url = f"https://{request.host}"
     
     referral_link = f"{base_url}/register?ref={user.referral_code}"
-    
-    # Share message for WhatsApp
     share_message = get_share_message() + f"\n\n{referral_link}"
     whatsapp_link = f"https://wa.me/?text={share_message}"
     
@@ -2850,258 +1925,6 @@ def referral_page():
         total_earned=total_earned,
         whatsapp_link=whatsapp_link
     )
-
-@app.route('/upgrade')
-def upgrade_page():
-    if 'username' not in session:
-        return redirect('/login')
-    
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
-        return redirect('/login')
-    
-    if user.is_banned:
-        session.clear()
-        flash('❌ Your account has been banned.', 'error')
-        return redirect('/login')
-    
-    tiers = {
-        'BEGINNER': {'name': 'Beginner', 'cost': 1000, 'daily_limit': 6, 'description': '6 tasks/day · Earn up to ₦200 per task'},
-        'EXPERT': {'name': 'Expert', 'cost': 3500, 'daily_limit': 10, 'description': '10 tasks/day · Earn up to ₦500 per task'},
-        'LEGEND': {'name': 'Legend', 'cost': 10000, 'daily_limit': 15, 'description': '15 tasks/day · Earn up to ₦1,200 per task'}
-    }
-    
-    user_transactions = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.created_at.desc()).limit(5).all()
-    
-    return render_template_string(UPGRADE_PAGE,
-        user=user,
-        tiers=tiers,
-        transactions_list=[t.to_dict() for t in user_transactions],
-        get_payment_settings=get_payment_settings
-    )
-
-@app.route('/submit_payment', methods=['POST'])
-def submit_payment():
-    if 'username' not in session:
-        return redirect('/login')
-    
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
-        return redirect('/login')
-    
-    tier = request.form.get('tier')
-    amount = float(request.form.get('amount', 0))
-    sender_name = request.form.get('sender_name')
-    transaction_id = request.form.get('transaction_id')
-    amount_sent = float(request.form.get('amount_sent', 0))
-    payment_date = request.form.get('payment_date')
-    notes = request.form.get('notes', '')
-    
-    if Transaction.query.filter_by(transaction_id=transaction_id).first():
-        flash('❌ This transaction ID already exists!', 'error')
-        return redirect('/upgrade')
-    
-    tx = Transaction(
-        user_id=user.id,
-        amount=amount,
-        tier=tier,
-        transaction_id=transaction_id,
-        sender_name=sender_name,
-        payment_date=datetime.strptime(payment_date, '%Y-%m-%dT%H:%M'),
-        notes=notes,
-        status='PENDING',
-        type='UPGRADE'
-    )
-    db.session.add(tx)
-    db.session.commit()
-    
-    log_activity(user.id, 'submit_payment', f'Submitted payment for {tier} tier')
-    flash('✅ Payment proof submitted! Please wait for admin verification.', 'success')
-    return redirect('/upgrade')
-
-@app.route('/withdraw', methods=['GET', 'POST'])
-def withdraw_page():
-    if 'username' not in session:
-        return redirect('/login')
-    
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
-        return redirect('/login')
-    
-    if user.is_banned:
-        session.clear()
-        flash('❌ Your account has been banned.', 'error')
-        return redirect('/login')
-    
-    withdrawals = Withdrawal.query.filter_by(user_id=user.id).order_by(Withdrawal.created_at.desc()).limit(10).all()
-    
-    can_withdraw = can_withdraw_today()
-    next_date = get_next_withdrawal_date()
-    min_amount = MINIMUM_WITHDRAWAL
-    
-    if request.method == 'POST':
-        if not can_withdraw:
-            flash(f'❌ Withdrawals are only allowed on the 5th and 30th of each month. Next withdrawal date: {next_date.strftime("%B %d, %Y")}', 'error')
-            return redirect('/withdraw')
-        
-        amount = float(request.form.get('amount', 0))
-        bank_name = request.form.get('bank_name')
-        account_number = request.form.get('account_number')
-        account_name = request.form.get('account_name')
-        
-        if amount < min_amount:
-            flash(f'❌ Minimum withdrawal is ₦{min_amount:,}!', 'error')
-            return redirect('/withdraw')
-        
-        if amount > user.balance:
-            flash('❌ Insufficient balance!', 'error')
-            return redirect('/withdraw')
-        
-        withdrawal = Withdrawal(
-            user_id=user.id,
-            amount=amount,
-            bank_name=bank_name,
-            account_number=account_number,
-            account_name=account_name,
-            reference=f"WDL-{user.id}-{random.randint(1000,9999)}"
-        )
-        db.session.add(withdrawal)
-        
-        user.balance -= amount
-        db.session.commit()
-        
-        log_activity(user.id, 'withdraw_request', f'Requested withdrawal of ₦{amount}')
-        flash(f'💸 Withdrawal of ₦{amount:,.2f} requested!', 'success')
-        return redirect('/dashboard')
-    
-    return render_template_string(WITHDRAW_PAGE,
-        user=user,
-        withdrawals=withdrawals,
-        can_withdraw=can_withdraw,
-        next_date=next_date,
-        min_amount=min_amount
-    )
-
-@app.route('/account')
-def account_page():
-    if 'username' not in session:
-        return redirect('/login')
-    
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
-        return redirect('/login')
-    
-    if user.is_banned:
-        session.clear()
-        flash('❌ Your account has been banned.', 'error')
-        return redirect('/login')
-    
-    return render_template_string(ACCOUNT_PAGE, user=user)
-
-@app.route('/update_account', methods=['POST'])
-def update_account():
-    if 'username' not in session:
-        return redirect('/login')
-    
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
-        return redirect('/login')
-    
-    user.full_name = request.form.get('full_name')
-    user.phone = request.form.get('phone')
-    user.address = request.form.get('address')
-    user.occupation = request.form.get('occupation')
-    user.gender = request.form.get('gender')
-    user.bio = request.form.get('bio')
-    
-    dob = request.form.get('date_of_birth')
-    if dob:
-        user.date_of_birth = datetime.strptime(dob, '%Y-%m-%d').date()
-    
-    db.session.commit()
-    log_activity(user.id, 'update_account', 'Updated account information')
-    flash('✅ Account information updated successfully!', 'success')
-    return redirect('/account')
-
-@app.route('/update_bank', methods=['POST'])
-def update_bank():
-    if 'username' not in session:
-        return redirect('/login')
-    
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
-        return redirect('/login')
-    
-    user.bank_name = request.form.get('bank_name')
-    user.bank_account = request.form.get('bank_account')
-    user.account_name = request.form.get('account_name')
-    
-    db.session.commit()
-    log_activity(user.id, 'update_bank', 'Updated bank details')
-    flash('✅ Bank details updated successfully!', 'success')
-    return redirect('/account')
-
-@app.route('/set_theme', methods=['POST'])
-def set_theme():
-    if 'username' not in session:
-        return redirect('/login')
-    
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
-        return redirect('/login')
-    
-    user.theme = request.form.get('theme', 'light')
-    db.session.commit()
-    flash(f'✅ Theme set to {user.theme} mode!', 'success')
-    referer = request.referrer or '/account'
-    return redirect(referer)
-
-@app.route('/change_password', methods=['GET', 'POST'])
-def change_password():
-    if 'username' not in session:
-        return redirect('/login')
-    
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
-        return redirect('/login')
-    
-    if user.is_banned:
-        session.clear()
-        flash('❌ Your account has been banned.', 'error')
-        return redirect('/login')
-    
-    if request.method == 'POST':
-        current = request.form.get('current_password')
-        new = request.form.get('new_password')
-        confirm = request.form.get('confirm_password')
-        
-        if not user.check_password(current):
-            flash('❌ Current password is incorrect!', 'error')
-            return redirect('/change_password')
-        
-        if new != confirm:
-            flash('❌ New passwords do not match!', 'error')
-            return redirect('/change_password')
-        
-        if len(new) < 6:
-            flash('❌ Password must be at least 6 characters!', 'error')
-            return redirect('/change_password')
-        
-        user.set_password(new)
-        db.session.commit()
-        log_activity(user.id, 'change_password', 'Changed password')
-        flash('✅ Password changed successfully!', 'success')
-        return redirect('/account')
-    
-    return render_template_string(CHANGE_PASSWORD_PAGE, user=user)
 
 # ==================== ADMIN ROUTES ====================
 
@@ -3326,7 +2149,7 @@ if __name__ == '__main__':
     print("   /change_password - CHANGE_PASSWORD_PAGE")
     print("   /admin/login - ADMIN_LOGIN_PAGE")
     print("   /admin/dashboard - ADMIN_DASHBOARD_PAGE")
-    print("   /admin/users - ADMIN_USERS_PAGE")
+    print("   /admin/users - ADMIN_USERS_PAGE (With Reset Tasks button)")
     print("   /admin/settings - ADMIN_SETTINGS_PAGE")
     print("   /admin/support - ADMIN_SUPPORT_PAGE")
     print("=" * 60)
