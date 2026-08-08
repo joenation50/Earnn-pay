@@ -347,19 +347,6 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 
-.user-avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, var(--secondary), var(--gold));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-weight: 700;
-    font-size: 14px;
-}
-
 .card {
     background: var(--card-bg);
     border-radius: var(--radius);
@@ -379,12 +366,6 @@ body {
 @keyframes slideUp {
     to { opacity: 1; transform: translateY(0); }
 }
-.card:nth-child(1) { animation-delay: 0.05s; }
-.card:nth-child(2) { animation-delay: 0.1s; }
-.card:nth-child(3) { animation-delay: 0.15s; }
-.card:nth-child(4) { animation-delay: 0.2s; }
-.card:nth-child(5) { animation-delay: 0.25s; }
-
 .card h2 { font-size: 20px; font-weight: 700; margin-bottom: 12px; color: var(--text); }
 .card h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
 
@@ -872,28 +853,6 @@ textarea { min-height: 80px; resize: vertical; }
 .google-review-card .text { font-size: 13px; margin-top: 4px; color: var(--text); }
 .google-review-card .verified { font-size: 11px; color: var(--success); }
 
-.share-platforms {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin: 12px 0;
-}
-.share-platform {
-    background: var(--bg);
-    border-radius: var(--radius-sm);
-    padding: 16px;
-    text-align: center;
-    transition: var(--transition);
-    cursor: pointer;
-    border: 2px solid transparent;
-}
-.share-platform:hover {
-    border-color: var(--secondary);
-    transform: translateY(-2px);
-}
-.share-platform .platform-icon { font-size: 32px; display: block; margin-bottom: 4px; }
-.share-platform .platform-name { font-size: 12px; font-weight: 600; color: var(--text); }
-
 .share-confirm {
     background: var(--card-bg);
     border-radius: var(--radius-sm);
@@ -1083,17 +1042,22 @@ def log_activity(user_id, action, details=None, ip=None):
 def reset_user_tasks_if_needed(user):
     """Reset user's daily tasks if 24 hours have passed"""
     now = datetime.now()
-    if user.last_task_reset:
-        if now - user.last_task_reset >= timedelta(hours=24):
-            user.daily_tasks_completed = 0
-            user.last_task_reset = now
-            db.session.commit()
-            return True
-    else:
+    
+    # If user has never had a reset, set it now
+    if user.last_task_reset is None:
         user.last_task_reset = now
         user.daily_tasks_completed = 0
         db.session.commit()
         return True
+    
+    # Check if 24 hours have passed
+    time_since_reset = now - user.last_task_reset
+    if time_since_reset >= timedelta(hours=24):
+        user.daily_tasks_completed = 0
+        user.last_task_reset = now
+        db.session.commit()
+        return True
+    
     return False
 
 def get_user_today_tasks(user_id):
@@ -1535,7 +1499,12 @@ EARN_PAGE = """
                         {% if task.id in completed_ids %}
                             <span style="background:#27ae60;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">✅ Done</span>
                         {% elif remaining_tasks <= 0 %}
-                            <span style="background:#e74c3c;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">⛔ Limit</span>
+                            <div style="text-align:right;">
+                                <span style="background:#e74c3c;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">⛔ Limit</span>
+                                <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">
+                                    Come back in {{ reset_time }}
+                                </div>
+                            </div>
                         {% else %}
                             <form method="POST" action="/complete_task/{{ task.id }}">
                                 <button type="submit" style="background:linear-gradient(135deg,#e94560,#ff6b81);color:white;border:none;padding:10px 20px;border-radius:50px;font-size:14px;font-weight:600;cursor:pointer;">🚀 Start</button>
@@ -2277,11 +2246,7 @@ ADMIN_DASHBOARD_PAGE = """
                     <div>
                         <strong>{{ user.username }}</strong>
                         <span class="tier-badge tier-{{ user.tier|lower }}">{{ user.tier }}</span>
-                        {% if user.tier != 'FREE' %}
-                            <span style="font-size:10px;color:#27ae60;margin-left:4px;">💰 PAID</span>
-                        {% else %}
-                            <span style="font-size:10px;color:var(--text-muted);margin-left:4px;">FREE</span>
-                        {% endif %}
+                        <span style="font-size:10px;color:var(--text-muted);margin-left:4px;">Tasks: {{ user.daily_tasks_completed }}/{{ user.daily_limit }}</span>
                     </div>
                     <div style="text-align:right;">
                         <div style="font-size:12px;">💰 ₦{{ "%.2f"|format(user.balance) }}</div>
@@ -2328,7 +2293,7 @@ ADMIN_USERS_PAGE = """
         <div class="card" style="overflow-x:auto;">
             <h3>📊 Registered Users</h3>
             <table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;">
-                <thead><tr style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;"><th style="padding:10px;text-align:left;">ID</th><th style="padding:10px;text-align:left;">Username</th><th style="padding:10px;text-align:left;">Email</th><th style="padding:10px;text-align:left;">Tier</th><th style="padding:10px;text-align:left;">Balance</th><th style="padding:10px;text-align:left;">Trust</th><th style="padding:10px;text-align:left;">Refs</th><th style="padding:10px;text-align:left;">Joined</th><th style="padding:10px;text-align:left;">Actions</th></tr></thead>
+                <thead><tr style="background:linear-gradient(135deg,#0a0a23,#1a1a3e);color:white;"><th style="padding:10px;text-align:left;">ID</th><th style="padding:10px;text-align:left;">Username</th><th style="padding:10px;text-align:left;">Email</th><th style="padding:10px;text-align:left;">Tier</th><th style="padding:10px;text-align:left;">Balance</th><th style="padding:10px;text-align:left;">Trust</th><th style="padding:10px;text-align:left;">Refs</th><th style="padding:10px;text-align:left;">Tasks Today</th><th style="padding:10px;text-align:left;">Actions</th></tr></thead>
                 <tbody>
                     {% for user in users %}
                     <tr style="border-bottom:1px solid var(--border);">
@@ -2339,8 +2304,11 @@ ADMIN_USERS_PAGE = """
                         <td style="padding:10px;">₦{{ "%.2f"|format(user.balance) }}</td>
                         <td style="padding:10px;">⭐ {{ user.trust_score }}</td>
                         <td style="padding:10px;">{{ user.total_referrals }}</td>
-                        <td style="padding:10px;font-size:11px;color:var(--text-light);">{{ user.created_at.strftime('%b %d, %Y') if user.created_at else 'N/A' }}</td>
+                        <td style="padding:10px;">{{ user.daily_tasks_completed }}/{{ user.daily_limit }}</td>
                         <td style="padding:10px;">
+                            <form method="POST" action="/admin/reset_tasks/{{ user.id }}" style="display:inline;">
+                                <button type="submit" class="btn btn-sm btn-primary" style="padding:4px 8px;font-size:10px;">🔄 Reset Tasks</button>
+                            </form>
                             {% if user.is_banned %}
                                 <form method="POST" action="/admin/user/{{ user.id }}/unban" style="display:inline;">
                                     <button type="submit" class="btn btn-sm btn-success" style="padding:4px 8px;font-size:10px;">Unban</button>
@@ -2629,9 +2597,12 @@ def dashboard():
     if user.last_task_reset:
         next_reset = user.last_task_reset + timedelta(hours=24)
         time_left = next_reset - now
-        hours = int(time_left.total_seconds() // 3600)
-        minutes = int((time_left.total_seconds() % 3600) // 60)
-        reset_time = f"{hours}h {minutes}m"
+        if time_left.total_seconds() > 0:
+            hours = int(time_left.total_seconds() // 3600)
+            minutes = int((time_left.total_seconds() % 3600) // 60)
+            reset_time = f"{hours}h {minutes}m"
+        else:
+            reset_time = "0h 0m (Resetting...)"
     else:
         reset_time = "24h 0m"
     
@@ -2664,8 +2635,15 @@ def earn():
         flash('❌ Your account has been banned.', 'error')
         return redirect('/login')
     
-    # Reset tasks if needed
+    # ========== FORCE RESET TASKS IF NEEDED ==========
     reset_user_tasks_if_needed(user)
+    
+    # ========== FORCE REFRESH THE DAILY TASKS COUNT ==========
+    today = datetime.now().date()
+    actual_completed = get_user_today_tasks(user.id)
+    if user.daily_tasks_completed != actual_completed:
+        user.daily_tasks_completed = actual_completed
+        db.session.commit()
     
     if user.tier == 'FREE':
         flash('⚠️ You need to upgrade your tier to access tasks!', 'error')
@@ -2673,7 +2651,6 @@ def earn():
     
     tasks = Task.query.filter_by(tier_required=user.tier, is_active=True).all()
     
-    today = datetime.now().date()
     completed = TaskCompletion.query.filter(
         TaskCompletion.user_id == user.id,
         db.func.date(TaskCompletion.completed_at) == today
@@ -2686,12 +2663,27 @@ def earn():
     # Calculate potential earnings
     potential_earnings = sum(task.reward for task in tasks[:remaining_tasks]) if tasks else 0
     
+    # Calculate reset time for display
+    now = datetime.now()
+    if user.last_task_reset:
+        next_reset = user.last_task_reset + timedelta(hours=24)
+        time_left = next_reset - now
+        if time_left.total_seconds() > 0:
+            hours = int(time_left.total_seconds() // 3600)
+            minutes = int((time_left.total_seconds() % 3600) // 60)
+            reset_time = f"{hours}h {minutes}m"
+        else:
+            reset_time = "0h 0m (Resetting...)"
+    else:
+        reset_time = "24h 0m"
+    
     return render_template_string(EARN_PAGE,
         user=user,
         tasks=tasks,
         completed_ids=completed_ids,
         remaining_tasks=remaining_tasks,
-        potential_earnings=potential_earnings
+        potential_earnings=potential_earnings,
+        reset_time=reset_time
     )
 
 @app.route('/complete_task/<int:task_id>', methods=['POST'])
@@ -3171,6 +3163,20 @@ def admin_users():
         users=all_users,
         total_users=len(all_users)
     )
+
+@app.route('/admin/reset_tasks/<int:user_id>', methods=['POST'])
+def admin_reset_tasks(user_id):
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    user = User.query.get_or_404(user_id)
+    user.daily_tasks_completed = 0
+    user.last_task_reset = datetime.now()
+    db.session.commit()
+    
+    log_activity(user.id, 'admin_reset_tasks', 'Admin reset tasks')
+    flash(f'✅ Tasks reset for {user.username}! They can now complete {user.daily_limit} tasks.', 'success')
+    return redirect('/admin/users')
 
 @app.route('/admin/user/<int:user_id>/ban', methods=['POST'])
 def admin_ban_user(user_id):
