@@ -2286,6 +2286,14 @@ ADMIN_USERS_PAGE = """
                             <form method="POST" action="/admin/reset_tasks/{{ user.id }}" style="display:inline;">
                                 <button type="submit" class="btn btn-sm btn-primary" style="padding:4px 8px;font-size:10px;">🔄 Reset</button>
                             </form>
+                            <form method="POST" action="/admin/upgrade_user/{{ user.id }}" style="display:inline;">
+                                <select name="new_tier" style="padding:4px;font-size:10px;width:auto;">
+                                    <option value="BEGINNER">Beginner</option>
+                                    <option value="EXPERT">Expert</option>
+                                    <option value="LEGEND">Legend</option>
+                                </select>
+                                <button type="submit" class="btn btn-sm btn-success" style="padding:4px 8px;font-size:10px;">⬆️</button>
+                            </form>
                             {% if user.is_banned %}
                                 <form method="POST" action="/admin/user/{{ user.id }}/unban" style="display:inline;">
                                     <button type="submit" class="btn btn-sm btn-success" style="padding:4px 8px;font-size:10px;">Unban</button>
@@ -3138,6 +3146,27 @@ def admin_reset_tasks(user_id):
     flash(f'✅ Tasks reset for {user.username}! They can now complete {user.daily_limit} tasks.', 'success')
     return redirect('/admin/users')
 
+@app.route('/admin/upgrade_user/<int:user_id>', methods=['POST'])
+def admin_upgrade_user(user_id):
+    if not session.get('admin'):
+        return redirect('/admin/login')
+    
+    user = User.query.get_or_404(user_id)
+    new_tier = request.form.get('new_tier')
+    
+    if new_tier in ['BEGINNER', 'EXPERT', 'LEGEND']:
+        tier_limits = {'BEGINNER': 6, 'EXPERT': 10, 'LEGEND': 15}
+        user.tier = new_tier
+        user.daily_limit = tier_limits.get(new_tier, 0)
+        db.session.commit()
+        
+        log_activity(user.id, 'admin_upgrade', f'Admin upgraded to {new_tier} tier')
+        flash(f'✅ {user.username} upgraded to {new_tier.title()} tier!', 'success')
+    else:
+        flash('❌ Invalid tier selected!', 'error')
+    
+    return redirect('/admin/users')
+
 @app.route('/admin/user/<int:user_id>/ban', methods=['POST'])
 def admin_ban_user(user_id):
     if not session.get('admin'):
@@ -3286,7 +3315,7 @@ if __name__ == '__main__':
     print("   /change_password - CHANGE_PASSWORD_PAGE")
     print("   /admin/login - ADMIN_LOGIN_PAGE")
     print("   /admin/dashboard - ADMIN_DASHBOARD_PAGE")
-    print("   /admin/users - ADMIN_USERS_PAGE (With Reset Tasks button)")
+    print("   /admin/users - ADMIN_USERS_PAGE (With Reset Tasks & Upgrade User)")
     print("   /admin/settings - ADMIN_SETTINGS_PAGE")
     print("   /admin/support - ADMIN_SUPPORT_PAGE")
     print("=" * 60)
@@ -3294,5 +3323,11 @@ if __name__ == '__main__':
     print(f"   URL: http://127.0.0.1:5000/admin/login")
     print(f"   Username: {ADMIN_USERNAME}")
     print(f"   Password: {ADMIN_PASSWORD}")
+    print("=" * 60)
+    print("📊 Admin Features:")
+    print("   ✅ Reset user tasks")
+    print("   ✅ Upgrade user tier manually")
+    print("   ✅ Ban/Unban users")
+    print("   ✅ Verify/Reject payments")
     print("=" * 60)
     app.run(host='0.0.0.0', port=5000)
