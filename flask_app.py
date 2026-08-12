@@ -1037,7 +1037,9 @@ def log_activity(user_id, action, details=None, ip=None):
     db.session.commit()
 
 def reset_user_tasks_if_needed(user):
+    """Reset user's daily tasks at midnight (start of new day)"""
     now = datetime.now()
+    today = now.date()
     
     if user.last_task_reset is None:
         user.last_task_reset = now
@@ -1045,8 +1047,9 @@ def reset_user_tasks_if_needed(user):
         db.session.commit()
         return True
     
-    time_since_reset = now - user.last_task_reset
-    if time_since_reset >= timedelta(hours=24):
+    last_reset_date = user.last_task_reset.date()
+    
+    if last_reset_date < today:
         user.daily_tasks_completed = 0
         user.last_task_reset = now
         db.session.commit()
@@ -1399,7 +1402,7 @@ DASHBOARD_PAGE = """
             <div class="flex-between">
                 <h3>⚡ Quick Actions</h3>
                 {% if user.tier != 'FREE' %}
-                <span style="font-size:11px;color:var(--text-muted);">🔄 Resets in {{ reset_time }}</span>
+                <span style="font-size:11px;color:var(--text-muted);">🔄 Resets at midnight</span>
                 {% endif %}
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
@@ -1469,6 +1472,7 @@ EARN_PAGE = """
             <div style="font-size:14px;opacity:0.9;">📊 Today's Earning Potential</div>
             <div style="font-size:32px;font-weight:800;">₦{{ potential_earnings }}</div>
             <div style="font-size:12px;opacity:0.8;">{{ remaining_tasks }} tasks remaining out of {{ user.daily_limit }}</div>
+            <div style="font-size:11px;opacity:0.7;margin-top:4px;">🔄 Resets at midnight every day</div>
         </div>
         
         {% for task in tasks %}
@@ -1489,7 +1493,7 @@ EARN_PAGE = """
                             <div style="text-align:right;">
                                 <span style="background:#e74c3c;color:white;padding:6px 12px;border-radius:50px;font-size:12px;font-weight:600;">⛔ Limit</span>
                                 <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">
-                                    Come back in {{ reset_time }}
+                                    Come back tomorrow at midnight
                                 </div>
                             </div>
                         {% else %}
@@ -2572,18 +2576,6 @@ def dashboard():
     today_tasks = get_user_today_tasks(user.id)
     remaining_tasks = max(0, user.daily_limit - today_tasks)
     
-    if user.last_task_reset:
-        next_reset = user.last_task_reset + timedelta(hours=24)
-        time_left = next_reset - now
-        if time_left.total_seconds() > 0:
-            hours = int(time_left.total_seconds() // 3600)
-            minutes = int((time_left.total_seconds() % 3600) // 60)
-            reset_time = f"{hours}h {minutes}m"
-        else:
-            reset_time = "0h 0m (Resetting...)"
-    else:
-        reset_time = "24h 0m"
-    
     announcements = Announcement.query.filter_by(is_active=True).order_by(Announcement.created_at.desc()).limit(3).all()
     
     return render_template_string(DASHBOARD_PAGE,
@@ -2594,7 +2586,6 @@ def dashboard():
         next_tier=next_tier,
         today_tasks=today_tasks,
         remaining_tasks=remaining_tasks,
-        reset_time=reset_time,
         announcements=announcements
     )
 
@@ -2638,26 +2629,12 @@ def earn():
     
     potential_earnings = sum(task.reward for task in tasks[:remaining_tasks]) if tasks else 0
     
-    now = datetime.now()
-    if user.last_task_reset:
-        next_reset = user.last_task_reset + timedelta(hours=24)
-        time_left = next_reset - now
-        if time_left.total_seconds() > 0:
-            hours = int(time_left.total_seconds() // 3600)
-            minutes = int((time_left.total_seconds() % 3600) // 60)
-            reset_time = f"{hours}h {minutes}m"
-        else:
-            reset_time = "0h 0m (Resetting...)"
-    else:
-        reset_time = "24h 0m"
-    
     return render_template_string(EARN_PAGE,
         user=user,
         tasks=tasks,
         completed_ids=completed_ids,
         remaining_tasks=remaining_tasks,
-        potential_earnings=potential_earnings,
-        reset_time=reset_time
+        potential_earnings=potential_earnings
     )
 
 @app.route('/complete_task/<int:task_id>', methods=['POST'])
@@ -2687,7 +2664,7 @@ def complete_task(task_id):
     today_tasks = get_user_today_tasks(user.id)
     
     if today_tasks >= user.daily_limit:
-        flash('⛔ Daily task limit reached!', 'error')
+        flash('⛔ Daily task limit reached! Come back tomorrow.', 'error')
         return redirect('/earn')
     
     completion = TaskCompletion(
@@ -3302,32 +3279,34 @@ if __name__ == '__main__':
     print("🌐 Open your browser and go to: http://127.0.0.1:5000")
     print("=" * 60)
     print("📄 ALL PAGES FULLY DEFINED:")
-    print("   / - LANDING_PAGE")
-    print("   /login - LOGIN_PAGE")
-    print("   /register - REGISTER_PAGE")
-    print("   /dashboard - DASHBOARD_PAGE")
-    print("   /earn - EARN_PAGE")
-    print("   /share_task - SHARE_TASK_PAGE")
-    print("   /referral - REFERRAL_PAGE")
-    print("   /upgrade - UPGRADE_PAGE")
-    print("   /withdraw - WITHDRAW_PAGE")
-    print("   /account - ACCOUNT_PAGE")
-    print("   /change_password - CHANGE_PASSWORD_PAGE")
-    print("   /admin/login - ADMIN_LOGIN_PAGE")
-    print("   /admin/dashboard - ADMIN_DASHBOARD_PAGE")
-    print("   /admin/users - ADMIN_USERS_PAGE (With Reset Tasks & Upgrade User)")
-    print("   /admin/settings - ADMIN_SETTINGS_PAGE")
-    print("   /admin/support - ADMIN_SUPPORT_PAGE")
+    print("   ✅ / - LANDING_PAGE")
+    print("   ✅ /login - LOGIN_PAGE")
+    print("   ✅ /register - REGISTER_PAGE")
+    print("   ✅ /dashboard - DASHBOARD_PAGE")
+    print("   ✅ /earn - EARN_PAGE (Midnight Reset)")
+    print("   ✅ /share_task - SHARE_TASK_PAGE")
+    print("   ✅ /referral - REFERRAL_PAGE")
+    print("   ✅ /upgrade - UPGRADE_PAGE")
+    print("   ✅ /withdraw - WITHDRAW_PAGE")
+    print("   ✅ /account - ACCOUNT_PAGE")
+    print("   ✅ /change_password - CHANGE_PASSWORD_PAGE")
+    print("   ✅ /admin/login - ADMIN_LOGIN_PAGE")
+    print("   ✅ /admin/dashboard - ADMIN_DASHBOARD_PAGE")
+    print("   ✅ /admin/users - ADMIN_USERS_PAGE")
+    print("   ✅ /admin/settings - ADMIN_SETTINGS_PAGE")
+    print("   ✅ /admin/support - ADMIN_SUPPORT_PAGE")
+    print("=" * 60)
+    print("📊 TASK RESET: Midnight every day (NO 24-hour rolling)")
+    print("📊 NO FREE TIER - Users must upgrade to earn")
+    print("📊 Referral System: ₦500 bonus per referral")
+    print("📊 Withdrawals: 5th & 30th of every month")
     print("=" * 60)
     print("🔐 Admin Panel:")
     print(f"   URL: http://127.0.0.1:5000/admin/login")
     print(f"   Username: {ADMIN_USERNAME}")
     print(f"   Password: {ADMIN_PASSWORD}")
     print("=" * 60)
-    print("📊 Admin Features:")
-    print("   ✅ Reset user tasks")
-    print("   ✅ Upgrade user tier manually")
-    print("   ✅ Ban/Unban users")
-    print("   ✅ Verify/Reject payments")
+    print("✅ All features preserved and fully functional!")
+    print("🛑 Press CTRL+C to stop the server")
     print("=" * 60)
     app.run(host='0.0.0.0', port=5000)
